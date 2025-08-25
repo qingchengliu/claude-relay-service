@@ -27,7 +27,7 @@ class CodeStatisticsRedis {
     const currentMonth = this.getMonthString(now)
 
     const pipeline = this.redis.getClient().pipeline()
-    
+
     const hasEditContent = editStats.totalEditedLines > 0
 
     // 只有真正有编辑内容时才记录编辑相关的统计
@@ -61,19 +61,19 @@ class CodeStatisticsRedis {
       const keyStatsKey = `${this.prefix}key:${keyId}`
       const dailyKey = `${this.prefix}daily:${keyId}:${today}`
       pipeline.expire(dailyKey, 86400 * 90) // 保留90天
-      
+
       for (const [toolName, count] of Object.entries(editStats.toolUsage)) {
         // API Key级别的工具调用统计
         pipeline.hincrby(keyStatsKey, `tool_${toolName}`, count)
-        
+
         // 每日工具调用统计
         pipeline.hincrby(dailyKey, `tool_${toolName}`, count)
         pipeline.hset(dailyKey, 'lastUpdated', now.toISOString())
-        
+
         // 系统级每日工具调用统计
         const systemDailyKey = `${this.prefix}system:daily:${today}`
         pipeline.hincrby(systemDailyKey, `tool_${toolName}`, count)
-        
+
         // 专门的工具统计键
         const toolDailyKey = `${this.prefix}tool:daily:${toolName}:${today}`
         pipeline.hincrby(toolDailyKey, 'count', count)
@@ -213,7 +213,9 @@ class CodeStatisticsRedis {
         const dateString = this.getDateString(date)
 
         // 获取所有语言的统计
-        const keys = await this.redis.getClient().keys(`${this.prefix}language:daily:*:${dateString}`)
+        const keys = await this.redis
+          .getClient()
+          .keys(`${this.prefix}language:daily:*:${dateString}`)
 
         for (const key of keys) {
           const language = key.split(':')[3] // 从 code_stats:language:daily:javascript:2024-01-01 中提取 javascript
@@ -246,10 +248,11 @@ class CodeStatisticsRedis {
       for (const key of keys) {
         // 只处理基础的用户统计键，过滤掉语言统计键等子键
         const parts = key.split(':')
-        if (parts.length !== 3) { // code_stats:key:keyId 应该正好是3部分
+        if (parts.length !== 3) {
+          // code_stats:key:keyId 应该正好是3部分
           continue
         }
-        
+
         const keyId = parts[2]
         const data = await this.redis.getClient().hgetall(key)
 
@@ -257,19 +260,19 @@ class CodeStatisticsRedis {
           // 获取API Key的详细信息来获取用户名
           const apiKeyInfo = await this.redis.getClient().hgetall(`apikey:${keyId}`)
           const userName = apiKeyInfo.name || keyId
-          
+
           // 获取总请求数和总费用
           const usageTotalKey = `usage:${keyId}`
           const costTotalKey = `usage:cost:total:${keyId}`
-          
+
           const [usageData, totalCost] = await Promise.all([
             this.redis.getClient().hgetall(usageTotalKey),
             this.redis.getClient().get(costTotalKey)
           ])
-          
+
           const totalRequests = parseInt(usageData.totalRequests || usageData.requests || 0)
           const totalCostValue = parseFloat(totalCost || 0)
-          
+
           leaderboard.push({
             keyId,
             userName,
@@ -305,10 +308,11 @@ class CodeStatisticsRedis {
       for (const key of keys) {
         // 只处理基础的用户统计键，过滤掉语言统计键等子键
         const parts = key.split(':')
-        if (parts.length !== 3) { // code_stats:key:keyId 应该正好是3部分
+        if (parts.length !== 3) {
+          // code_stats:key:keyId 应该正好是3部分
           continue
         }
-        
+
         const keyId = parts[2]
         let totalLines = 0
         let totalOperations = 0
@@ -318,29 +322,29 @@ class CodeStatisticsRedis {
         // 累计指定天数的统计数据
         let totalRequests = 0
         let totalCost = 0
-        
+
         for (let i = 0; i < days; i++) {
           const date = new Date(today)
           date.setDate(date.getDate() - i)
           const dateString = this.getDateString(date)
-          
+
           const dailyKey = `${this.prefix}daily:${keyId}:${dateString}`
           const dailyData = await this.redis.getClient().hgetall(dailyKey)
-          
+
           totalLines += parseInt(dailyData.editedLines || 0)
           totalOperations += parseInt(dailyData.editOperations || 0)
           totalNewFiles += parseInt(dailyData.newFiles || 0)
           totalModifiedFiles += parseInt(dailyData.modifiedFiles || 0)
-          
+
           // 获取对应日期的请求数和费用
           const usageDailyKey = `usage:daily:${keyId}:${dateString}`
           const costDailyKey = `usage:cost:daily:${keyId}:${dateString}`
-          
+
           const [usageData, costData] = await Promise.all([
             this.redis.getClient().hgetall(usageDailyKey),
             this.redis.getClient().get(costDailyKey)
           ])
-          
+
           totalRequests += parseInt(usageData.totalRequests || usageData.requests || 0)
           totalCost += parseFloat(costData || 0)
         }
@@ -350,7 +354,7 @@ class CodeStatisticsRedis {
           // 获取API Key的详细信息来获取用户名
           const apiKeyInfo = await this.redis.getClient().hgetall(`apikey:${keyId}`)
           const userName = apiKeyInfo.name || keyId
-          
+
           leaderboard.push({
             keyId,
             userName,
@@ -388,10 +392,11 @@ class CodeStatisticsRedis {
       for (const key of keys) {
         // 只处理基础的用户统计键，过滤掉语言统计键等子键
         const parts = key.split(':')
-        if (parts.length !== 3) { // code_stats:key:keyId 应该正好是3部分
+        if (parts.length !== 3) {
+          // code_stats:key:keyId 应该正好是3部分
           continue
         }
-        
+
         const keyId = parts[2]
         let totalLines = 0
         let totalOperations = 0
@@ -401,29 +406,29 @@ class CodeStatisticsRedis {
         // 获取当月的所有日期
         let totalRequests = 0
         let totalCost = 0
-        
+
         const daysInMonth = new Date(year, month, 0).getDate()
         for (let day = 1; day <= daysInMonth; day++) {
           const date = new Date(year, month - 1, day)
           const dateString = this.getDateString(date)
-          
+
           const dailyKey = `${this.prefix}daily:${keyId}:${dateString}`
           const dailyData = await this.redis.getClient().hgetall(dailyKey)
-          
+
           totalLines += parseInt(dailyData.editedLines || 0)
           totalOperations += parseInt(dailyData.editOperations || 0)
           totalNewFiles += parseInt(dailyData.newFiles || 0)
           totalModifiedFiles += parseInt(dailyData.modifiedFiles || 0)
-          
+
           // 获取对应日期的请求数和费用
           const usageDailyKey = `usage:daily:${keyId}:${dateString}`
           const costDailyKey = `usage:cost:daily:${keyId}:${dateString}`
-          
+
           const [usageData, costData] = await Promise.all([
             this.redis.getClient().hgetall(usageDailyKey),
             this.redis.getClient().get(costDailyKey)
           ])
-          
+
           totalRequests += parseInt(usageData.totalRequests || usageData.requests || 0)
           totalCost += parseFloat(costData || 0)
         }
@@ -433,7 +438,7 @@ class CodeStatisticsRedis {
           // 获取API Key的详细信息来获取用户名
           const apiKeyInfo = await this.redis.getClient().hgetall(`apikey:${keyId}`)
           const userName = apiKeyInfo.name || keyId
-          
+
           leaderboard.push({
             keyId,
             userName,
@@ -492,10 +497,10 @@ class CodeStatisticsRedis {
         const date = new Date(today)
         date.setDate(date.getDate() - i)
         const dateString = this.getDateString(date)
-        
+
         const dailyKey = `${this.prefix}daily:${keyId}:${dateString}`
         const dailyData = await this.redis.getClient().hgetall(dailyKey)
-        
+
         stats.daily.push({
           date: dateString,
           ...dailyData
@@ -507,17 +512,19 @@ class CodeStatisticsRedis {
         const date = new Date(today)
         date.setDate(date.getDate() - i)
         const dateString = this.getDateString(date)
-        
-        const langKeys = await this.redis.getClient().keys(`${this.prefix}key:${keyId}:language:daily:*:${dateString}`)
-        
+
+        const langKeys = await this.redis
+          .getClient()
+          .keys(`${this.prefix}key:${keyId}:language:daily:*:${dateString}`)
+
         for (const key of langKeys) {
           const language = key.split(':')[5] // 从 code_stats:key:xxx:language:daily:python:2024-01-01 中提取 python
           const data = await this.redis.getClient().hgetall(key)
-          
+
           if (!stats.languages[language]) {
             stats.languages[language] = { lines: 0, operations: 0 }
           }
-          
+
           stats.languages[language].lines += parseInt(data.lines || 0)
           stats.languages[language].operations += parseInt(data.operations || 0)
         }
@@ -543,12 +550,13 @@ class CodeStatisticsRedis {
       for (const key of keys) {
         // 只处理基础统计键 (code_stats:key:xxx)，不包含子键
         const parts = key.split(':')
-        if (parts.length === 3) { // code_stats:key:keyId
+        if (parts.length === 3) {
+          // code_stats:key:keyId
           const keyId = parts[2]
-          
+
           if (!userSet.has(keyId)) {
             const apiKeyInfo = await this.redis.getClient().hgetall(`apikey:${keyId}`)
-            
+
             if (apiKeyInfo.name) {
               users.push({
                 keyId,
@@ -587,7 +595,9 @@ class CodeStatisticsRedis {
         const dateString = this.getDateString(date)
 
         // 获取该日期所有工具的统计
-        const toolKeys = await this.redis.getClient().keys(`${this.prefix}tool:daily:*:${dateString}`)
+        const toolKeys = await this.redis
+          .getClient()
+          .keys(`${this.prefix}tool:daily:*:${dateString}`)
 
         stats.daily[dateString] = {}
 
@@ -614,14 +624,14 @@ class CodeStatisticsRedis {
           }
 
           stats.tools[toolName].totalCount += count
-          userSet.forEach(userId => stats.tools[toolName].totalUsers.add(userId))
+          userSet.forEach((userId) => stats.tools[toolName].totalUsers.add(userId))
           stats.totalUsage += count
         }
       }
 
       // 计算平均值和转换Set为数量
       for (const [toolName, toolData] of Object.entries(stats.tools)) {
-        toolData.dailyAvg = Math.round(toolData.totalCount / days * 100) / 100
+        toolData.dailyAvg = Math.round((toolData.totalCount / days) * 100) / 100
         toolData.totalUsers = toolData.totalUsers.size
       }
 
@@ -676,7 +686,7 @@ class CodeStatisticsRedis {
 
       // 计算平均值
       for (const toolData of Object.values(stats.tools)) {
-        toolData.dailyAvg = Math.round(toolData.totalCount / days * 100) / 100
+        toolData.dailyAvg = Math.round((toolData.totalCount / days) * 100) / 100
       }
 
       return stats
@@ -692,7 +702,7 @@ class CodeStatisticsRedis {
   async getTopToolsRanking(limit = 10, days = 30) {
     try {
       const toolStats = await this.getToolUsageStatistics(days)
-      
+
       const ranking = Object.entries(toolStats.tools)
         .filter(([toolName]) => toolName !== 'Unknown' && toolName !== 'undefined')
         .map(([toolName, data]) => ({

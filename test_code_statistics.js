@@ -16,10 +16,11 @@ const mockResponse = {
     },
     {
       type: 'tool_use',
-      name: 'Write', 
+      name: 'Write',
       input: {
         file_path: '/home/user/new_file.py',
-        content: 'def hello():\n    print("Hello World!")\n    return True\n\nif __name__ == "__main__":\n    hello()'
+        content:
+          'def hello():\n    print("Hello World!")\n    return True\n\nif __name__ == "__main__":\n    hello()'
       }
     },
     {
@@ -33,7 +34,7 @@ const mockResponse = {
             new_string: '"name": "new"\n"version": "1.0.0"'
           },
           {
-            old_string: '"debug": false',  
+            old_string: '"debug": false',
             new_string: '"debug": true\n"env": "development"'
           }
         ]
@@ -47,7 +48,7 @@ const emptyResponse = {
   content: []
 }
 
-// 测试无效响应 
+// 测试无效响应
 const invalidResponse = {
   content: [
     {
@@ -58,7 +59,7 @@ const invalidResponse = {
 }
 
 console.log('🧪 Testing Code Statistics Extraction...')
-console.log('=' .repeat(50))
+console.log('='.repeat(50))
 
 // 测试1: 正常工具使用
 console.log('\n📝 Test 1: Normal tool usage')
@@ -85,7 +86,7 @@ console.log('\n✅ Code Statistics Test Completed!')
 // 验证预期结果
 console.log('\n📊 Expected Results Analysis:')
 console.log(`- Total edited lines: ${stats1.totalEditedLines} (should be > 0)`)
-console.log(`- Edit operations: ${stats1.editOperations} (should be 3)`) 
+console.log(`- Edit operations: ${stats1.editOperations} (should be 3)`)
 console.log(`- New files: ${stats1.newFiles} (should be 1)`)
 console.log(`- Modified files: ${stats1.modifiedFiles} (should be 2)`)
 console.log(`- Languages detected: ${Object.keys(stats1.languages).length} (should be 2+)`)

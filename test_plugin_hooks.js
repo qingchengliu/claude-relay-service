@@ -4,7 +4,7 @@
 const config = require('./config/config')
 
 console.log('🧪 Testing Plugin Configuration...')
-console.log('=' .repeat(50))
+console.log('='.repeat(50))
 
 // 检查插件配置
 console.log('\n📋 Plugin Configuration:')
@@ -26,22 +26,22 @@ hooks.afterUsageRecord = async (keyId, usageData, model, response) => {
   console.log(`  - Model: ${model}`)
   console.log(`  - Usage data type: ${typeof usageData}`)
   console.log(`  - Response content length: ${response?.content?.length || 0}`)
-  
+
   if (response?.content?.length > 0) {
     console.log('  - Tool uses found:')
     response.content.forEach((item, index) => {
       console.log(`    ${index + 1}. ${item.name} (${item.type})`)
     })
   }
-  
+
   // 模拟统计提取
   const statistics = require('./plugins/code-statistics/statistics')
   const stats = statistics.extractEditStatistics(response)
-  
+
   if (stats.totalEditedLines > 0) {
     console.log('  📊 Statistics extracted:')
     console.log(`     - Lines: ${stats.totalEditedLines}`)
-    console.log(`     - Operations: ${stats.editOperations}`) 
+    console.log(`     - Operations: ${stats.editOperations}`)
     console.log(`     - New files: ${stats.newFiles}`)
     console.log(`     - Modified files: ${stats.modifiedFiles}`)
     return true
@@ -76,9 +76,10 @@ const mockResponse1 = {
 }
 
 console.log('\n📝 Test 1: Response with tool usage')
-hooks.afterUsageRecord('test-key-123', mockUsageData1, 'claude-3-5-sonnet-20241022', mockResponse1)
-  .then(result => console.log(`   Result: ${result ? '✅ SUCCESS' : '❌ FAILED'}`))
-  .catch(err => console.log(`   Error: ${err.message}`))
+hooks
+  .afterUsageRecord('test-key-123', mockUsageData1, 'claude-3-5-sonnet-20241022', mockResponse1)
+  .then((result) => console.log(`   Result: ${result ? '✅ SUCCESS' : '❌ FAILED'}`))
+  .catch((err) => console.log(`   Error: ${err.message}`))
 
 // 测试2：无工具使用的响应
 const mockResponse2 = {
@@ -87,9 +88,12 @@ const mockResponse2 = {
 
 setTimeout(() => {
   console.log('\n📝 Test 2: Response without tool usage')
-  hooks.afterUsageRecord('test-key-456', mockUsageData1, 'claude-3-5-sonnet-20241022', mockResponse2)
-    .then(result => console.log(`   Result: ${result ? '✅ SUCCESS' : '❌ NO CONTENT (EXPECTED)'}`))
-    .catch(err => console.log(`   Error: ${err.message}`))
+  hooks
+    .afterUsageRecord('test-key-456', mockUsageData1, 'claude-3-5-sonnet-20241022', mockResponse2)
+    .then((result) =>
+      console.log(`   Result: ${result ? '✅ SUCCESS' : '❌ NO CONTENT (EXPECTED)'}`)
+    )
+    .catch((err) => console.log(`   Error: ${err.message}`))
 }, 100)
 
 console.log('\n🔚 Plugin Hook Test Completed!')

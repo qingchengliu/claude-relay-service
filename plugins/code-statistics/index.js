@@ -38,7 +38,8 @@ module.exports = {
           })
 
           if (response.content && Array.isArray(response.content)) {
-            logger.info('📊 [Code Stats] Response content items:', 
+            logger.info(
+              '📊 [Code Stats] Response content items:',
               response.content.map((item, index) => ({
                 index,
                 type: item.type,
@@ -59,14 +60,14 @@ module.exports = {
         }
 
         const editStats = statistics.extractEditStatistics(response)
-        
+
         // 只要有工具调用就记录统计，不仅仅是编辑工具
         const hasToolUsage = editStats.toolUsage && Object.keys(editStats.toolUsage).length > 0
         const hasEditContent = editStats.totalEditedLines > 0
-        
+
         if (hasToolUsage || hasEditContent) {
           await redisExtension.recordEditStatistics(keyId, editStats, model)
-          
+
           if (hasEditContent) {
             logger.info(
               `📝 Code stats recorded: ${editStats.totalEditedLines} lines, ${editStats.editOperations} operations, ${Object.keys(editStats.toolUsage).length} tools`

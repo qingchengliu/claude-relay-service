@@ -14,22 +14,23 @@ class PluginLoader {
       logger.info('🔌 Plugin system disabled')
       return
     }
-    
+
     global.pluginHooks = this.hooks
     this.loadPlugins(app)
   }
 
   loadPlugins(app) {
     const pluginsDir = path.join(__dirname)
-    const pluginDirs = fs.readdirSync(pluginsDir, { withFileTypes: true })
-      .filter(dirent => dirent.isDirectory())
-      .map(dirent => dirent.name)
+    const pluginDirs = fs
+      .readdirSync(pluginsDir, { withFileTypes: true })
+      .filter((dirent) => dirent.isDirectory())
+      .map((dirent) => dirent.name)
 
     for (const pluginName of pluginDirs) {
       try {
         const pluginPath = path.join(pluginsDir, pluginName)
         const plugin = require(pluginPath)
-        
+
         if (plugin.init && this.shouldLoadPlugin(pluginName)) {
           plugin.init(app, this.hooks)
           this.plugins.set(pluginName, plugin)

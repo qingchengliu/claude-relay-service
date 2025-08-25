@@ -3,7 +3,7 @@
  */
 function extractEditStatistics(response) {
   const logger = require('../../src/utils/logger')
-  
+
   // 开始统计提取
 
   const stats = {
@@ -13,7 +13,7 @@ function extractEditStatistics(response) {
     modifiedFiles: 0,
     languages: {},
     fileTypes: {},
-    toolUsage: {}  // 新增：工具调用统计
+    toolUsage: {} // 新增：工具调用统计
   }
 
   if (!response?.content || !Array.isArray(response.content)) {
@@ -33,13 +33,13 @@ function extractEditStatistics(response) {
     if (item.type === 'tool_use') {
       // 获取工具名称，支持多种可能的字段位置
       const toolName = item.name || item.function?.name || item.tool_name || 'Unknown'
-      
+
       // 统计所有工具调用次数
       stats.toolUsage[toolName] = (stats.toolUsage[toolName] || 0) + 1
       // 记录工具调用
-      
+
       let result = null
-      
+
       if (isEditTool(toolName)) {
         // 处理编辑工具
         result = processToolUse(item)
@@ -51,24 +51,24 @@ function extractEditStatistics(response) {
         // 处理其他工具（Read、Glob等）
         result = processOtherTool(item)
       }
-      
+
       if (result) {
         // 工具处理结果
 
         stats.totalEditedLines += result.lines
         stats.editOperations += result.operations
-        
+
         if (result.type === 'create') {
           stats.newFiles++
         } else if (result.type === 'modify') {
           stats.modifiedFiles++
         }
-        
+
         // 统计文件类型和语言
         if (result.fileType) {
           stats.fileTypes[result.fileType] = (stats.fileTypes[result.fileType] || 0) + result.lines
         }
-        
+
         if (result.language) {
           stats.languages[result.language] = (stats.languages[result.language] || 0) + result.lines
         }
@@ -103,7 +103,7 @@ function isEditTool(toolName) {
  */
 function processToolUse(toolUse) {
   const logger = require('../../src/utils/logger')
-  
+
   // 处理工具使用
 
   const result = {
@@ -167,7 +167,7 @@ function processToolUse(toolUse) {
  */
 function countNonEmptyLines(content) {
   const logger = require('../../src/utils/logger')
-  
+
   if (!content || typeof content !== 'string') {
     // 无效内容
     return 0
@@ -175,7 +175,7 @@ function countNonEmptyLines(content) {
 
   const lines = content.split('\n')
   const nonEmptyLines = lines.filter((line) => line.trim().length > 0)
-  
+
   // 统计非空行数
 
   return nonEmptyLines.length
@@ -245,7 +245,7 @@ function processBashCommand(toolUse) {
 
   const command = toolUse.input.command.trim()
   const analysis = analyzeBashCommand(command)
-  
+
   if (!analysis.isFileEdit) {
     return result
   }
@@ -280,7 +280,7 @@ function analyzeBashCommand(command) {
     // 重定向创建文件 (echo "content" > file)
     {
       regex: /^echo\s+.*\s*>\s*([^\s]+)$/,
-      operation: 'create', 
+      operation: 'create',
       fileIndex: 1
     },
     // cat 追加 - 必须在单个>之前
@@ -621,7 +621,7 @@ function estimateEditedLines(command, analysis) {
 function processOtherTool(toolUse) {
   const result = {
     lines: 0,
-    operations: 0,  // 非编辑工具不计入编辑操作次数
+    operations: 0, // 非编辑工具不计入编辑操作次数
     type: 'read',
     fileType: null,
     language: null
@@ -635,7 +635,7 @@ function processOtherTool(toolUse) {
         result.language = detectLanguage(toolUse.input.file_path)
       }
       break
-      
+
     case 'Glob':
       // Glob工具可以统计搜索的文件类型模式
       if (toolUse.input?.pattern) {
@@ -647,7 +647,7 @@ function processOtherTool(toolUse) {
         }
       }
       break
-      
+
     case 'Grep':
       // Grep工具可以根据glob参数统计搜索的文件类型
       if (toolUse.input?.glob) {
@@ -663,16 +663,16 @@ function processOtherTool(toolUse) {
         result.language = detectLanguageFromExtension(result.fileType)
       }
       break
-      
+
     case 'LS':
       // LS工具主要用于目录浏览，不统计具体文件类型
       break
-      
+
     case 'WebFetch':
     case 'WebSearch':
       // 网络工具不涉及本地文件
       break
-      
+
     default:
       // 其他工具暂不处理
       break

@@ -24,7 +24,7 @@ const testResponses = [
     response: {
       content: [
         {
-          type: 'tool_use', 
+          type: 'tool_use',
           name: 'Bash',
           input: {
             command: 'cat > config.py'
@@ -39,7 +39,7 @@ const testResponses = [
       content: [
         {
           type: 'tool_use',
-          name: 'Bash', 
+          name: 'Bash',
           input: {
             command: 'sed -i "s/old/new/g" script.sh'
           }
@@ -172,12 +172,12 @@ const testResponses = [
 // 执行测试
 testResponses.forEach((test, index) => {
   console.log(`${index + 1}. ${test.name}`)
-  
+
   const stats = statistics.extractEditStatistics(test.response)
-  
+
   console.log('   统计结果:', {
     编辑行数: stats.totalEditedLines,
-    操作次数: stats.editOperations, 
+    操作次数: stats.editOperations,
     新建文件: stats.newFiles,
     修改文件: stats.modifiedFiles,
     语言分布: stats.languages,
@@ -191,7 +191,7 @@ console.log('=== 测试Bash命令分析功能 ===\n')
 
 const bashCommands = [
   'echo "content" > file.txt',
-  'cat >> log.txt', 
+  'cat >> log.txt',
   'sed -i "s/old/new/" config.json',
   'vim script.py',
   'touch README.md',
