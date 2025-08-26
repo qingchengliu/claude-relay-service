@@ -72,83 +72,95 @@
         </div>
 
         <!-- 统计卡片 -->
-        <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-4">
+        <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-5">
           <!-- 编辑行数卡片 -->
-          <div class="rounded-lg bg-white p-6 shadow-lg">
-            <div class="flex items-center justify-between">
-              <div class="mr-8 flex-1">
-                <p class="mb-1 text-xs font-semibold text-gray-600 sm:text-sm">
+          <div class="rounded-lg bg-white p-4 shadow-lg">
+            <div class="flex items-center justify-center">
+              <div class="flex-1 text-center">
+                <p class="mb-2 text-xs font-semibold text-gray-600 sm:text-sm">
                   {{ getOverviewCardTitle('编辑行数') }}
                 </p>
-                <div class="mb-2 flex flex-wrap items-baseline gap-2">
-                  <p class="text-xl font-bold text-blue-600 sm:text-2xl md:text-3xl">
-                    {{ formatNumber(systemStats?.periodLines || 0) }}
-                  </p>
-                </div>
-                <div class="text-xs text-gray-500"></div>
+                <p class="text-xl font-bold text-blue-600 sm:text-2xl md:text-3xl">
+                  {{ formatNumber(systemStats?.periodLines || 0) }}
+                </p>
               </div>
-              <div class="stat-icon flex-shrink-0 bg-gradient-to-br from-blue-500 to-blue-600">
-                <i class="fas fa-edit" />
+              <div class="flex items-center justify-center" style="width: 25%;">
+                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+                  <i class="fas fa-edit text-xl" />
+                </div>
               </div>
             </div>
           </div>
-          <!-- 创建文件数卡片 -->
-          <div class="rounded-lg bg-white p-6 shadow-lg">
-            <div class="flex items-center justify-between">
-              <div class="mr-8 flex-1">
-                <p class="mb-1 text-xs font-semibold text-gray-600 sm:text-sm">
+          <!-- 创建文件次数卡片 -->
+          <div class="rounded-lg bg-white p-4 shadow-lg">
+            <div class="flex items-center justify-center">
+              <div class="flex-1 text-center">
+                <p class="mb-2 text-xs font-semibold text-gray-600 sm:text-sm">
                   {{ getOverviewCardTitle('创建文件次数') }}
                 </p>
-                <div class="mb-2 flex flex-wrap items-baseline gap-2">
-                  <p class="text-xl font-bold text-purple-600 sm:text-2xl md:text-3xl">
-                    {{ formatNumber(systemStats?.periodNewFiles || 0) }}
-                  </p>
-                </div>
-                <div class="text-xs text-gray-500"></div>
+                <p class="text-xl font-bold text-purple-600 sm:text-2xl md:text-3xl">
+                  {{ formatNumber(systemStats?.periodNewFiles || 0) }}
+                </p>
               </div>
-              <div class="stat-icon flex-shrink-0 bg-gradient-to-br from-purple-500 to-purple-600">
-                <i class="fas fa-file-plus" />
+              <div class="flex items-center justify-center" style="width: 25%;">
+                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-purple-600 text-white">
+                  <i class="fas fa-file-plus text-xl" />
+                </div>
               </div>
             </div>
           </div>
-          <!-- 修改文件数卡片 -->
-          <div class="rounded-lg bg-white p-6 shadow-lg">
-            <div class="flex items-center justify-between">
-              <div class="mr-8 flex-1">
-                <p class="mb-1 text-xs font-semibold text-gray-600 sm:text-sm">
+          <!-- 修改文件次数卡片 -->
+          <div class="rounded-lg bg-white p-4 shadow-lg">
+            <div class="flex items-center justify-center">
+              <div class="flex-1 text-center">
+                <p class="mb-2 text-xs font-semibold text-gray-600 sm:text-sm">
                   {{ getOverviewCardTitle('修改文件次数') }}
                 </p>
-                <div class="mb-2 flex flex-wrap items-baseline gap-2">
-                  <p class="text-xl font-bold text-orange-600 sm:text-2xl md:text-3xl">
-                    {{ formatNumber(systemStats?.periodModifiedFiles || 0) }}
-                  </p>
-                </div>
-                <div class="text-xs text-gray-500"></div>
+                <p class="text-xl font-bold text-orange-600 sm:text-2xl md:text-3xl">
+                  {{ formatNumber(systemStats?.periodModifiedFiles || 0) }}
+                </p>
               </div>
-              <div class="stat-icon flex-shrink-0 bg-gradient-to-br from-orange-500 to-orange-600">
-                <i class="fas fa-file-edit" />
+              <div class="flex items-center justify-center" style="width: 25%;">
+                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 text-white">
+                  <i class="fas fa-file-edit text-xl" />
+                </div>
               </div>
             </div>
           </div>
-          <!-- Token详细显示卡片 -->
-          <div class="rounded-lg bg-white p-6 shadow-lg">
-            <div class="flex items-center justify-between">
-              <div class="mr-8 flex-1">
-                <p class="mb-1 text-xs font-semibold text-gray-600 sm:text-sm">
+          <!-- 活跃人数卡片 -->
+          <div class="rounded-lg bg-white p-4 shadow-lg">
+            <div class="flex items-center justify-center">
+              <div class="flex-1 text-center">
+                <p class="mb-2 text-xs font-semibold text-gray-600 sm:text-sm">
+                  {{ getOverviewCardTitle('活跃人数') }}
+                </p>
+                <p class="text-xl font-bold text-emerald-600 sm:text-2xl md:text-3xl">
+                  {{ formatNumber(activeUsersCount || 0) }}
+                </p>
+              </div>
+              <div class="flex items-center justify-center" style="width: 25%;">
+                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+                  <i class="fas fa-users text-xl" />
+                </div>
+              </div>
+            </div>
+          </div>
+          <!-- Token卡片 -->
+          <div class="rounded-lg bg-white p-4 shadow-lg">
+            <div class="flex items-center justify-center">
+              <div class="flex-1 text-center">
+                <p class="mb-2 text-xs font-semibold text-gray-600 sm:text-sm">
                   {{ getOverviewCardTitle('Token') }}
                 </p>
-                <div class="mb-2 flex flex-wrap items-baseline gap-2">
-                  <p class="text-xl font-bold text-indigo-600 sm:text-2xl md:text-3xl">
-                    {{ formatTokens(dashboardOverview?.todayTokens || 0) }}
-                  </p>
-                  <span class="text-sm font-medium text-green-600"
-                    >/ {{ dashboardOverview?.totalCost || '$0.00' }}</span
-                  >
-                </div>
-                <div class="text-xs text-gray-500"></div>
+                <p class="text-xl font-bold text-indigo-600 sm:text-2xl md:text-3xl">
+                  {{ formatTokens(dashboardOverview?.todayTokens || 0) }}
+                </p>
+                <p class="text-sm font-medium text-green-600">{{ dashboardOverview?.totalCost || '$0.00' }}</p>
               </div>
-              <div class="stat-icon flex-shrink-0 bg-gradient-to-br from-indigo-500 to-indigo-600">
-                <i class="fas fa-coins" />
+              <div class="flex items-center justify-center" style="width: 25%;">
+                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 text-white">
+                  <i class="fas fa-coins text-xl" />
+                </div>
               </div>
             </div>
           </div>
@@ -292,6 +304,28 @@
                       </span>
                     </div>
                   </th>
+                  <!-- 活跃天数列（仅非当天显示） -->
+                  <th
+                    v-if="overviewTimePeriod !== 'today'"
+                    class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
+                    @click="sortLeaderboard('activeDays')"
+                  >
+                    <div class="flex items-center">
+                      活跃天数
+                      <span class="ml-1">
+                        <i
+                          v-if="leaderboardSortBy === 'activeDays'"
+                          :class="
+                            leaderboardSortOrder === 'desc'
+                              ? 'fas fa-chevron-down'
+                              : 'fas fa-chevron-up'
+                          "
+                          class="text-xs text-blue-500"
+                        ></i>
+                        <i v-else class="fas fa-sort text-xs text-gray-400"></i>
+                      </span>
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-gray-200 bg-white">
@@ -322,6 +356,13 @@
                   <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
                     ${{ (user.totalCost || 0).toFixed(4) }}
                   </td>
+                  <!-- 活跃天数列（仅非当天显示） -->
+                  <td
+                    v-if="overviewTimePeriod !== 'today'"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
+                    {{ user.activeDays || 0 }} 天
+                  </td>
                 </tr>
               </tbody>
             </table>
@@ -329,7 +370,7 @@
 
           <!-- 分页控件 -->
           <div
-            v-if="leaderboardTotalPages > 1 || leaderboard.length > 10"
+            v-if="leaderboardTotalPages > 1 || leaderboardTotalCount > 10"
             class="mt-4 flex items-center justify-between border-t border-gray-200 px-6 py-3"
           >
             <div class="flex flex-1 items-center justify-between">
@@ -357,10 +398,10 @@
                     }}</span>
                     到
                     <span class="font-medium">{{
-                      Math.min(leaderboardPage * leaderboardPageSize, leaderboard.length)
+                      Math.min(leaderboardPage * leaderboardPageSize, leaderboardTotalCount)
                     }}</span>
                     项，共
-                    <span class="font-medium">{{ leaderboard.length }}</span>
+                    <span class="font-medium">{{ leaderboardTotalCount }}</span>
                     项
                   </p>
                 </div>
@@ -607,6 +648,9 @@ const dashboardOverview = ref({
   todayCacheReadTokens: 0
 })
 
+// 活跃人数数据
+const activeUsersCount = ref(0)
+
 // 时间段相关
 const overviewTimePeriod = ref('today') // 默认今天
 const toolsTimePeriod = ref('today') // 默认今天
@@ -624,32 +668,25 @@ const leaderboardPage = ref(1)
 const leaderboardPageSize = ref(10)
 const leaderboardSortBy = ref('totalEditedLines') // 默认按编辑行数排序
 const leaderboardSortOrder = ref('desc') // 降序
+const leaderboardTotalCount = ref(0) // 总记录数
+const leaderboardTotalPagesComputed = ref(0) // 总页数
 
-// 排行榜相关计算属性
+// 排行榜相关计算属性 - 由于后端已经处理分页和排序，前端直接使用数据
 const sortedLeaderboard = computed(() => {
-  const sorted = [...leaderboard.value].sort((a, b) => {
-    const field = leaderboardSortBy.value
-    const aValue = a[field] || 0
-    const bValue = b[field] || 0
-
-    // 数字类型排序
-    if (leaderboardSortOrder.value === 'desc') {
-      return bValue - aValue
-    } else {
-      return aValue - bValue
-    }
-  })
-  return sorted
+  // 后端已经处理排序和分页，直接返回数据
+  return leaderboard.value
 })
 
 const paginatedLeaderboard = computed(() => {
-  const start = (leaderboardPage.value - 1) * leaderboardPageSize.value
-  const end = start + leaderboardPageSize.value
-  return sortedLeaderboard.value.slice(start, end)
+  // 后端已经处理分页，直接返回数据
+  return leaderboard.value
 })
 
 const leaderboardTotalPages = computed(() => {
-  return Math.ceil(leaderboard.value.length / leaderboardPageSize.value)
+  return (
+    leaderboardTotalPagesComputed.value ||
+    Math.ceil(leaderboardTotalCount.value / leaderboardPageSize.value)
+  )
 })
 
 const leaderboardHasPrevPage = computed(() => leaderboardPage.value > 1)
@@ -694,17 +731,27 @@ async function fetchSystemStats() {
 async function fetchLeaderboard() {
   try {
     const daysParam = getDaysParam(overviewTimePeriod.value)
-    const response = await fetch(`/admin/code-stats/leaderboard?${daysParam}`, {
-      headers: {
-        Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
+    const pageParam = `page=${leaderboardPage.value}&limit=${leaderboardPageSize.value}`
+    const sortParam = `sortBy=${leaderboardSortBy.value}&sortOrder=${leaderboardSortOrder.value}`
+    const response = await fetch(
+      `/admin/code-stats/leaderboard?${daysParam}&${pageParam}&${sortParam}`,
+      {
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
+        }
       }
-    })
+    )
     if (!response.ok) {
       throw new Error('Failed to fetch leaderboard')
     }
     const data = await response.json()
     if (data.success) {
       leaderboard.value = data.data || []
+      // 更新分页信息
+      if (data.pagination) {
+        leaderboardTotalCount.value = data.pagination.total
+        leaderboardTotalPagesComputed.value = data.pagination.totalPages
+      }
     }
   } catch (error) {
     console.error('Error fetching leaderboard:', error)
@@ -776,6 +823,28 @@ async function fetchToolRanking() {
   } catch (error) {
     console.error('Error fetching tool ranking:', error)
     showToast('获取工具排行榜失败', 'error')
+  }
+}
+
+// 获取活跃人数统计
+async function fetchActiveUsers() {
+  try {
+    const daysParam = getDaysParam(overviewTimePeriod.value)
+    const response = await fetch(`/admin/code-stats/active-users?${daysParam}`, {
+      headers: {
+        Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
+      }
+    })
+    if (!response.ok) {
+      throw new Error('Failed to fetch active users')
+    }
+    const data = await response.json()
+    if (data.success) {
+      activeUsersCount.value = data.data?.activeUsers || 0
+    }
+  } catch (error) {
+    console.error('Error fetching active users:', error)
+    showToast('获取活跃人数失败', 'error')
   }
 }
 
@@ -889,7 +958,8 @@ async function changeOverviewTimePeriod(period) {
       fetchSystemStats(),
       fetchLanguageStats(),
       fetchLeaderboard(), // 添加排行榜数据刷新
-      fetchUsageCosts() // 添加使用统计数据刷新，实现时间段联动
+      fetchUsageCosts(), // 添加使用统计数据刷新，实现时间段联动
+      fetchActiveUsers() // 添加活跃人数数据刷新
     ])
 
     await nextTick()
@@ -1274,7 +1344,8 @@ async function initializeData() {
       fetchLanguageStats(),
       fetchToolStats(),
       fetchToolRanking(),
-      fetchUsageCosts()
+      fetchUsageCosts(),
+      fetchActiveUsers()
     ])
 
     // 等待DOM更新后创建当前tab的图表
@@ -1292,22 +1363,25 @@ async function initializeData() {
 function goToLeaderboardPage(page) {
   if (page >= 1 && page <= leaderboardTotalPages.value) {
     leaderboardPage.value = page
+    fetchLeaderboard()
   }
 }
 
 function leaderboardPrevPage() {
   if (leaderboardHasPrevPage.value) {
     leaderboardPage.value--
+    fetchLeaderboard()
   }
 }
 
 function leaderboardNextPage() {
   if (leaderboardHasNextPage.value) {
     leaderboardPage.value++
+    fetchLeaderboard()
   }
 }
 
-// 排行榜排序函数
+// 排行榜排序函数 - 现在需要重新请求数据
 function sortLeaderboard(field) {
   if (leaderboardSortBy.value === field) {
     // 如果已经是当前排序字段，则切换排序顺序
@@ -1317,13 +1391,15 @@ function sortLeaderboard(field) {
     leaderboardSortBy.value = field
     leaderboardSortOrder.value = 'desc'
   }
-  // 重置到第一页
+  // 重置到第一页并重新获取数据
   leaderboardPage.value = 1
+  fetchLeaderboard()
 }
 
 // 排行榜每页条数变更
 function changeLeaderboardPageSize() {
   leaderboardPage.value = 1 // 重置到第一页
+  fetchLeaderboard() // 重新获取数据
 }
 
 // 获取排行榜页码列表
@@ -1464,11 +1540,5 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.stat-icon {
-  @apply flex h-12 w-12 items-center justify-center rounded-lg text-white;
-}
-
-.stat-icon i {
-  @apply text-lg;
-}
+/* 自定义样式已移至内联样式 */
 </style>

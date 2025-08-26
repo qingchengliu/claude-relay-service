@@ -22,8 +22,8 @@ module.exports = {
     hooks.afterUsageRecord = async (keyId, usageData, model, response) => {
       try {
         logger.info('📊 [Code Stats] Hook triggered', {
-          keyId: keyId,
-          model: model,
+          keyId,
+          model,
           hasUsageData: !!usageData,
           hasResponse: !!response,
           responseType: typeof response

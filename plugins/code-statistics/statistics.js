@@ -185,7 +185,9 @@ function countNonEmptyLines(content) {
  * 从文件路径提取文件类型
  */
 function extractFileType(filePath) {
-  if (!filePath) return null
+  if (!filePath) {
+    return null
+  }
 
   const extension = filePath.split('.').pop()?.toLowerCase()
   return extension || null
@@ -195,7 +197,9 @@ function extractFileType(filePath) {
  * 检测编程语言
  */
 function detectLanguage(filePath, content) {
-  if (!filePath) return null
+  if (!filePath) {
+    return null
+  }
 
   const extension = extractFileType(filePath)
 
@@ -639,7 +643,7 @@ function processOtherTool(toolUse) {
     case 'Glob':
       // Glob工具可以统计搜索的文件类型模式
       if (toolUse.input?.pattern) {
-        const pattern = toolUse.input.pattern
+        const { pattern } = toolUse.input
         const fileExtMatch = pattern.match(/\*\.(\w+)/)
         if (fileExtMatch) {
           result.fileType = fileExtMatch[1].toLowerCase()
@@ -651,7 +655,7 @@ function processOtherTool(toolUse) {
     case 'Grep':
       // Grep工具可以根据glob参数统计搜索的文件类型
       if (toolUse.input?.glob) {
-        const glob = toolUse.input.glob
+        const { glob } = toolUse.input
         const fileExtMatch = glob.match(/\*\.(\w+)/)
         if (fileExtMatch) {
           result.fileType = fileExtMatch[1].toLowerCase()

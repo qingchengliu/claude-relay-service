@@ -16,7 +16,7 @@ class CodeStatisticsRedis {
   /**
    * 记录编辑统计数据
    */
-  async recordEditStatistics(keyId, editStats, model = 'unknown') {
+  async recordEditStatistics(keyId, editStats, _model = 'unknown') {
     if (!this.redis) {
       logger.error('❌ Redis not initialized for code statistics')
       return
@@ -78,9 +78,9 @@ class CodeStatisticsRedis {
         const toolDailyKey = `${this.prefix}tool:daily:${toolName}:${today}`
         pipeline.hincrby(toolDailyKey, 'count', count)
         pipeline.hincrby(toolDailyKey, 'users', 0) // 初始化用户计数器
-        pipeline.sadd(toolDailyKey + ':users', keyId) // 用集合记录使用该工具的用户
+        pipeline.sadd(`${toolDailyKey}:users`, keyId) // 用集合记录使用该工具的用户
         pipeline.expire(toolDailyKey, 86400 * 90)
-        pipeline.expire(toolDailyKey + ':users', 86400 * 90)
+        pipeline.expire(`${toolDailyKey}:users`, 86400 * 90)
       }
     }
 
@@ -240,7 +240,13 @@ class CodeStatisticsRedis {
   /**
    * 获取排行榜数据
    */
-  async getLeaderboard(limit = 10) {
+  async getLeaderboard(
+    limit = 10,
+    offset = 0,
+    pageLimit = null,
+    sortBy = 'totalEditedLines',
+    sortOrder = 'desc'
+  ) {
     try {
       const keys = await this.redis.getClient().keys(`${this.prefix}key:*`)
       const leaderboard = []
@@ -280,26 +286,41 @@ class CodeStatisticsRedis {
             totalEditOperations: parseInt(data.totalEditOperations || 0),
             totalNewFiles: parseInt(data.totalNewFiles || 0),
             totalModifiedFiles: parseInt(data.totalModifiedFiles || 0),
-            totalRequests: totalRequests,
+            totalRequests,
             totalCost: totalCostValue
           })
         }
       }
 
-      // 按编辑行数排序
-      leaderboard.sort((a, b) => b.totalEditedLines - a.totalEditedLines)
+      // 自定义排序
+      this.sortLeaderboard(leaderboard, sortBy, sortOrder)
 
-      return leaderboard.slice(0, limit)
+      const total = leaderboard.length
+      const finalLimit = pageLimit || limit
+      const paginatedData =
+        finalLimit > 0 ? leaderboard.slice(offset, offset + finalLimit) : leaderboard
+
+      return {
+        data: paginatedData,
+        total
+      }
     } catch (error) {
       logger.error('❌ Failed to get leaderboard:', error)
-      return []
+      return { data: [], total: 0 }
     }
   }
 
   /**
    * 获取指定天数内的排行榜数据
    */
-  async getLeaderboardByDays(limit = 10, days = 7) {
+  async getLeaderboardByDays(
+    limit = 10,
+    days = 7,
+    offset = 0,
+    pageLimit = null,
+    sortBy = 'totalEditedLines',
+    sortOrder = 'desc'
+  ) {
     try {
       const keys = await this.redis.getClient().keys(`${this.prefix}key:*`)
       const leaderboard = []
@@ -323,6 +344,8 @@ class CodeStatisticsRedis {
         let totalRequests = 0
         let totalCost = 0
 
+        // 计算活跃天数
+        let activeDays = 0
         for (let i = 0; i < days; i++) {
           const date = new Date(today)
           date.setDate(date.getDate() - i)
@@ -331,10 +354,20 @@ class CodeStatisticsRedis {
           const dailyKey = `${this.prefix}daily:${keyId}:${dateString}`
           const dailyData = await this.redis.getClient().hgetall(dailyKey)
 
-          totalLines += parseInt(dailyData.editedLines || 0)
-          totalOperations += parseInt(dailyData.editOperations || 0)
-          totalNewFiles += parseInt(dailyData.newFiles || 0)
-          totalModifiedFiles += parseInt(dailyData.modifiedFiles || 0)
+          const dayLines = parseInt(dailyData.editedLines || 0)
+          const dayOperations = parseInt(dailyData.editOperations || 0)
+          const dayNewFiles = parseInt(dailyData.newFiles || 0)
+          const dayModifiedFiles = parseInt(dailyData.modifiedFiles || 0)
+
+          totalLines += dayLines
+          totalOperations += dayOperations
+          totalNewFiles += dayNewFiles
+          totalModifiedFiles += dayModifiedFiles
+
+          // 如果当天有任何编辑活动，则计为活跃天
+          if (dayLines > 0 || dayOperations > 0 || dayNewFiles > 0 || dayModifiedFiles > 0) {
+            activeDays++
+          }
 
           // 获取对应日期的请求数和费用
           const usageDailyKey = `usage:daily:${keyId}:${dateString}`
@@ -360,28 +393,43 @@ class CodeStatisticsRedis {
             userName,
             totalEditedLines: totalLines,
             totalEditOperations: totalOperations,
-            totalNewFiles: totalNewFiles,
-            totalModifiedFiles: totalModifiedFiles,
-            totalRequests: totalRequests,
-            totalCost: totalCost
+            totalNewFiles,
+            totalModifiedFiles,
+            totalRequests,
+            totalCost,
+            activeDays // 新增活跃天数字段
           })
         }
       }
 
-      // 按编辑行数排序
-      leaderboard.sort((a, b) => b.totalEditedLines - a.totalEditedLines)
+      // 自定义排序
+      this.sortLeaderboard(leaderboard, sortBy, sortOrder)
 
-      return leaderboard.slice(0, limit)
+      const total = leaderboard.length
+      const finalLimit = pageLimit || limit
+      const paginatedData =
+        finalLimit > 0 ? leaderboard.slice(offset, offset + finalLimit) : leaderboard
+
+      return {
+        data: paginatedData,
+        total
+      }
     } catch (error) {
       logger.error('❌ Failed to get leaderboard by days:', error)
-      return []
+      return { data: [], total: 0 }
     }
   }
 
   /**
    * 获取当月排行榜数据
    */
-  async getLeaderboardByMonth(limit = 10) {
+  async getLeaderboardByMonth(
+    limit = 10,
+    offset = 0,
+    pageLimit = null,
+    sortBy = 'totalEditedLines',
+    sortOrder = 'desc'
+  ) {
     try {
       const keys = await this.redis.getClient().keys(`${this.prefix}key:*`)
       const leaderboard = []
@@ -406,6 +454,7 @@ class CodeStatisticsRedis {
         // 获取当月的所有日期
         let totalRequests = 0
         let totalCost = 0
+        let activeDays = 0
 
         const daysInMonth = new Date(year, month, 0).getDate()
         for (let day = 1; day <= daysInMonth; day++) {
@@ -415,10 +464,20 @@ class CodeStatisticsRedis {
           const dailyKey = `${this.prefix}daily:${keyId}:${dateString}`
           const dailyData = await this.redis.getClient().hgetall(dailyKey)
 
-          totalLines += parseInt(dailyData.editedLines || 0)
-          totalOperations += parseInt(dailyData.editOperations || 0)
-          totalNewFiles += parseInt(dailyData.newFiles || 0)
-          totalModifiedFiles += parseInt(dailyData.modifiedFiles || 0)
+          const dayLines = parseInt(dailyData.editedLines || 0)
+          const dayOperations = parseInt(dailyData.editOperations || 0)
+          const dayNewFiles = parseInt(dailyData.newFiles || 0)
+          const dayModifiedFiles = parseInt(dailyData.modifiedFiles || 0)
+
+          totalLines += dayLines
+          totalOperations += dayOperations
+          totalNewFiles += dayNewFiles
+          totalModifiedFiles += dayModifiedFiles
+
+          // 如果当天有任何编辑活动，则计为活跃天
+          if (dayLines > 0 || dayOperations > 0 || dayNewFiles > 0 || dayModifiedFiles > 0) {
+            activeDays++
+          }
 
           // 获取对应日期的请求数和费用
           const usageDailyKey = `usage:daily:${keyId}:${dateString}`
@@ -444,21 +503,30 @@ class CodeStatisticsRedis {
             userName,
             totalEditedLines: totalLines,
             totalEditOperations: totalOperations,
-            totalNewFiles: totalNewFiles,
-            totalModifiedFiles: totalModifiedFiles,
-            totalRequests: totalRequests,
-            totalCost: totalCost
+            totalNewFiles,
+            totalModifiedFiles,
+            totalRequests,
+            totalCost,
+            activeDays // 新增活跃天数字段
           })
         }
       }
 
-      // 按编辑行数排序
-      leaderboard.sort((a, b) => b.totalEditedLines - a.totalEditedLines)
+      // 自定义排序
+      this.sortLeaderboard(leaderboard, sortBy, sortOrder)
 
-      return leaderboard.slice(0, limit)
+      const total = leaderboard.length
+      const finalLimit = pageLimit || limit
+      const paginatedData =
+        finalLimit > 0 ? leaderboard.slice(offset, offset + finalLimit) : leaderboard
+
+      return {
+        data: paginatedData,
+        total
+      }
     } catch (error) {
       logger.error('❌ Failed to get leaderboard by month:', error)
-      return []
+      return { data: [], total: 0 }
     }
   }
 
@@ -604,7 +672,7 @@ class CodeStatisticsRedis {
         for (const key of toolKeys) {
           const toolName = key.split(':')[3] // 从 code_stats:tool:daily:Edit:2024-01-01 中提取 Edit
           const data = await this.redis.getClient().hgetall(key)
-          const userSet = await this.redis.getClient().smembers(key + ':users')
+          const userSet = await this.redis.getClient().smembers(`${key}:users`)
 
           const count = parseInt(data.count || 0)
           const users = userSet.length
@@ -630,7 +698,7 @@ class CodeStatisticsRedis {
       }
 
       // 计算平均值和转换Set为数量
-      for (const [toolName, toolData] of Object.entries(stats.tools)) {
+      for (const [_toolName, toolData] of Object.entries(stats.tools)) {
         toolData.dailyAvg = Math.round((toolData.totalCount / days) * 100) / 100
         toolData.totalUsers = toolData.totalUsers.size
       }
@@ -719,6 +787,72 @@ class CodeStatisticsRedis {
       logger.error('❌ Failed to get top tools ranking:', error)
       return []
     }
+  }
+
+  /**
+   * 获取活跃用户数
+   */
+  async getActiveUsersCount(days = 1) {
+    try {
+      const activeUsers = new Set()
+      const today = new Date()
+
+      for (let i = 0; i < days; i++) {
+        const date = new Date(today)
+        date.setDate(date.getDate() - i)
+        const dateString = this.getDateString(date)
+
+        // 获取该日期所有用户的统计数据
+        const keys = await this.redis.getClient().keys(`${this.prefix}daily:*:${dateString}`)
+
+        for (const key of keys) {
+          const parts = key.split(':')
+          // 格式: code_stats:daily:keyId:date
+          if (parts.length === 4) {
+            const keyId = parts[2]
+            const dailyData = await this.redis.getClient().hgetall(key)
+
+            // 检查是否有任何编辑活动
+            const hasActivity =
+              parseInt(dailyData.editedLines || 0) > 0 ||
+              parseInt(dailyData.editOperations || 0) > 0 ||
+              parseInt(dailyData.newFiles || 0) > 0 ||
+              parseInt(dailyData.modifiedFiles || 0) > 0
+
+            if (hasActivity) {
+              activeUsers.add(keyId)
+            }
+          }
+        }
+      }
+
+      return activeUsers.size
+    } catch (error) {
+      logger.error('❌ Failed to get active users count:', error)
+      return 0
+    }
+  }
+
+  /**
+   * 排序排行榜数据
+   */
+  sortLeaderboard(leaderboard, sortBy = 'totalEditedLines', sortOrder = 'desc') {
+    leaderboard.sort((a, b) => {
+      const aValue = a[sortBy] || 0
+      const bValue = b[sortBy] || 0
+
+      // 处理字符串类型的排序
+      if (sortBy === 'userName') {
+        return sortOrder === 'desc' ? bValue.localeCompare(aValue) : aValue.localeCompare(bValue)
+      }
+
+      // 数值类型排序
+      if (sortOrder === 'desc') {
+        return bValue - aValue
+      } else {
+        return aValue - bValue
+      }
+    })
   }
 
   getDateString(date) {

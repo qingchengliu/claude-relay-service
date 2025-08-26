@@ -66,24 +66,80 @@ adminRouter.get('/languages', authenticateAdmin, async (req, res) => {
 // 管理员路由 - 获取代码统计排行榜
 adminRouter.get('/leaderboard', authenticateAdmin, async (req, res) => {
   try {
-    const { limit = 10, days, month, all } = req.query
+    const {
+      limit = 10,
+      page = 1,
+      days,
+      month,
+      all,
+      sortBy = 'totalEditedLines',
+      sortOrder = 'desc'
+    } = req.query
+    const pageNumber = parseInt(page)
+    const limitNumber = parseInt(limit)
+    const offset = (pageNumber - 1) * limitNumber
 
-    let leaderboard
+    let leaderboard, total
     if (all === 'true') {
       // 获取历史以来的排行榜
-      leaderboard = await redisExtension.getLeaderboard(parseInt(limit))
+      const result = await redisExtension.getLeaderboard(0, offset, limitNumber, sortBy, sortOrder)
+      ;({ data: leaderboard, total } = result)
     } else if (month === 'current') {
       // 获取当月排行榜
-      leaderboard = await redisExtension.getLeaderboardByMonth(parseInt(limit))
+      const result = await redisExtension.getLeaderboardByMonth(
+        0,
+        offset,
+        limitNumber,
+        sortBy,
+        sortOrder
+      )
+      ;({ data: leaderboard, total } = result)
     } else {
       // 获取指定天数的排行榜
       const daysNum = days ? parseInt(days) : 30
-      leaderboard = await redisExtension.getLeaderboardByDays(parseInt(limit), daysNum)
+      const result = await redisExtension.getLeaderboardByDays(
+        0,
+        daysNum,
+        offset,
+        limitNumber,
+        sortBy,
+        sortOrder
+      )
+      ;({ data: leaderboard, total } = result)
     }
 
     res.json({
       success: true,
-      data: leaderboard
+      data: leaderboard,
+      pagination: {
+        page: pageNumber,
+        limit: limitNumber,
+        total,
+        totalPages: Math.ceil(total / limitNumber)
+      }
+    })
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    })
+  }
+})
+
+// 管理员路由 - 获取活跃人数统计
+adminRouter.get('/active-users', authenticateAdmin, async (req, res) => {
+  try {
+    const { days } = req.query
+    const daysNum = days ? parseInt(days) : 1 // 默认当天
+
+    const activeUsers = await redisExtension.getActiveUsersCount(daysNum)
+
+    res.json({
+      success: true,
+      data: {
+        activeUsers,
+        days: daysNum
+      }
     })
   } catch (error) {
     res.status(500).json({
