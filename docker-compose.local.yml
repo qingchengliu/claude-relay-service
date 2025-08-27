@@ -60,6 +60,65 @@ services:
       timeout: 10s
       retries: 3
 
+  # 🤖 代码统计截图定时任务服务
+  screenshot-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.screenshot
+    container_name: code-stats-screenshot
+    restart: unless-stopped
+    
+    # 🔑 使用 .env 文件配置
+    env_file:
+      - .env
+    environment:
+      # 服务地址配置（使用容器网络访问）
+      - BASE_URL=http://claude-relay:3000
+      # 时区设置
+      - TZ=Asia/Shanghai
+      # Python输出不缓冲
+      - PYTHONUNBUFFERED=1
+      
+    volumes:
+      # 挂载日志目录
+      - ./logs/screenshot:/app/logs
+      
+    depends_on:
+      - claude-relay
+      
+    networks:
+      - claude-relay-network
+      
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+          
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/screenshot_scheduler.log') else 1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      
+    # 安全选项（Chrome需要）
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+
 networks:
   claude-relay-network:
     driver: bridge

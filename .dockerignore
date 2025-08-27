@@ -45,6 +45,9 @@ docker-compose.*.yml
 Dockerfile
 .dockerignore
 
+# 但保留 docker/cache 目录（Chrome缓存）
+!docker/cache/
+
 # Test files
 test/
 tests/
