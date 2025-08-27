@@ -183,6 +183,7 @@ function countNonEmptyLines(content) {
 
 /**
  * 从文件路径提取文件类型
+ * 只统计编程语言相关的文件扩展名
  */
 function extractFileType(filePath) {
   if (!filePath) {
@@ -190,11 +191,18 @@ function extractFileType(filePath) {
   }
 
   const extension = filePath.split('.').pop()?.toLowerCase()
-  return extension || null
+
+  // 只统计编程语言和相关文件类型
+  if (isCodeFileExtension(extension)) {
+    return extension
+  }
+
+  return null // 不统计非编程文件
 }
 
 /**
  * 检测编程语言
+ * 只检测编程语言相关的文件类型
  */
 function detectLanguage(filePath, content) {
   if (!filePath) {
@@ -202,30 +210,72 @@ function detectLanguage(filePath, content) {
   }
 
   const extension = extractFileType(filePath)
+  if (!extension) {
+    return null // 不是编程文件
+  }
 
   const languageMap = {
+    // JavaScript/TypeScript
     js: 'javascript',
+    jsx: 'javascript',
     ts: 'typescript',
+    tsx: 'typescript',
+    mjs: 'javascript',
+
+    // Python
     py: 'python',
+    pyw: 'python',
+
+    // Java
     java: 'java',
-    cpp: 'cpp',
+
+    // C/C++
     c: 'c',
+    cpp: 'cpp',
+    cc: 'cpp',
+    cxx: 'cpp',
+    h: 'c',
+    hpp: 'cpp',
+
+    // C#
+    cs: 'csharp',
+
+    // Other languages
     go: 'go',
     rs: 'rust',
     php: 'php',
     rb: 'ruby',
     swift: 'swift',
     kt: 'kotlin',
+    kts: 'kotlin',
     scala: 'scala',
-    html: 'html',
-    css: 'css',
-    sql: 'sql',
+
+    // Scripts
     sh: 'shell',
-    yaml: 'yaml',
-    yml: 'yaml',
-    json: 'json',
-    xml: 'xml',
-    md: 'markdown'
+    bash: 'shell',
+    zsh: 'shell',
+    fish: 'shell',
+    ps1: 'powershell',
+    bat: 'batch',
+    cmd: 'batch',
+
+    // Web frontend
+    html: 'html',
+    htm: 'html',
+    css: 'css',
+    scss: 'css',
+    sass: 'css',
+    less: 'css',
+    vue: 'vue',
+    svelte: 'svelte',
+
+    // Documentation and markup
+    md: 'markdown',
+    markdown: 'markdown',
+    rst: 'rst',
+
+    // Database
+    sql: 'sql'
   }
 
   return languageMap[extension] || extension
@@ -686,67 +736,155 @@ function processOtherTool(toolUse) {
 }
 
 /**
- * 根据文件扩展名检测编程语言
+ * 判断是否为编程语言相关的文件扩展名
+ */
+function isCodeFileExtension(extension) {
+  if (!extension) {
+    return false
+  }
+
+  // 编程语言源码文件
+  const programmingLanguages = [
+    // JavaScript/TypeScript
+    'js',
+    'jsx',
+    'ts',
+    'tsx',
+    'mjs',
+    // Python
+    'py',
+    'pyw',
+    // Java
+    'java',
+    // C/C++
+    'c',
+    'cpp',
+    'cc',
+    'cxx',
+    'h',
+    'hpp',
+    // C#
+    'cs',
+    // 其他编程语言
+    'go',
+    'rs',
+    'php',
+    'rb',
+    'swift',
+    'kt',
+    'kts',
+    'scala',
+    'r',
+    'pl',
+    'pm',
+    'lua',
+    'dart'
+  ]
+
+  // 脚本文件
+  const scriptFiles = ['sh', 'bash', 'zsh', 'fish', 'ps1', 'bat', 'cmd']
+
+  // Web前端文件
+  const webFiles = ['html', 'htm', 'css', 'scss', 'sass', 'less', 'vue', 'svelte']
+
+  // 文档和标记语言
+  const documentFiles = ['md', 'markdown', 'rst', 'adoc']
+
+  // 数据库相关
+  const databaseFiles = ['sql', 'graphql', 'gql']
+
+  const codeExtensions = [
+    ...programmingLanguages,
+    ...scriptFiles,
+    ...webFiles,
+    ...documentFiles,
+    ...databaseFiles
+  ]
+
+  return codeExtensions.includes(extension.toLowerCase())
+}
+
+/**
+ * 根据文件扩展名检测编程语言（只检测编程相关文件）
  */
 function detectLanguageFromExtension(extension) {
+  if (!extension || !isCodeFileExtension(extension)) {
+    return null // 不是编程文件则返回null
+  }
+
   const languageMap = {
+    // JavaScript/TypeScript
     js: 'javascript',
-    ts: 'typescript',
     jsx: 'javascript',
+    ts: 'typescript',
     tsx: 'typescript',
+    mjs: 'javascript',
+
+    // Python
     py: 'python',
+    pyw: 'python',
+
+    // Java
     java: 'java',
-    cpp: 'cpp',
+
+    // C/C++
     c: 'c',
+    cpp: 'cpp',
+    cc: 'cpp',
+    cxx: 'cpp',
+    h: 'c',
+    hpp: 'cpp',
+
+    // C#
+    cs: 'csharp',
+
+    // 其他编程语言
     go: 'go',
     rs: 'rust',
     php: 'php',
     rb: 'ruby',
     swift: 'swift',
     kt: 'kotlin',
-    cs: 'csharp',
-    vb: 'vbnet',
-    fs: 'fsharp',
+    kts: 'kotlin',
     scala: 'scala',
     r: 'r',
-    m: 'objectivec',
-    h: 'c',
-    cc: 'cpp',
-    cxx: 'cpp',
-    hpp: 'cpp',
-    hxx: 'cpp',
-    sh: 'bash',
-    bash: 'bash',
-    zsh: 'bash',
-    fish: 'fish',
+    pl: 'perl',
+    pm: 'perl',
+    lua: 'lua',
+    dart: 'dart',
+
+    // 脚本文件
+    sh: 'shell',
+    bash: 'shell',
+    zsh: 'shell',
+    fish: 'shell',
     ps1: 'powershell',
-    psm1: 'powershell',
-    psd1: 'powershell',
-    sql: 'sql',
+    bat: 'batch',
+    cmd: 'batch',
+
+    // Web前端
     html: 'html',
+    htm: 'html',
     css: 'css',
     scss: 'scss',
     sass: 'sass',
     less: 'less',
-    xml: 'xml',
-    json: 'json',
-    yaml: 'yaml',
-    yml: 'yaml',
-    toml: 'toml',
-    ini: 'ini',
-    cfg: 'cfg',
-    conf: 'conf',
-    properties: 'properties',
+    vue: 'vue',
+    svelte: 'svelte',
+
+    // 文档和标记语言
     md: 'markdown',
+    markdown: 'markdown',
     rst: 'rst',
-    tex: 'latex',
-    dockerfile: 'dockerfile',
-    makefile: 'makefile',
-    cmake: 'cmake',
-    gradle: 'gradle'
+    adoc: 'asciidoc',
+
+    // 数据库
+    sql: 'sql',
+    graphql: 'graphql',
+    gql: 'graphql'
   }
 
-  return languageMap[extension?.toLowerCase()] || 'unknown'
+  return languageMap[extension.toLowerCase()] || 'unknown'
 }
 
 module.exports = {
@@ -757,5 +895,6 @@ module.exports = {
   processBashCommand,
   analyzeBashCommand,
   processOtherTool,
-  detectLanguageFromExtension
+  detectLanguageFromExtension,
+  isCodeFileExtension
 }
