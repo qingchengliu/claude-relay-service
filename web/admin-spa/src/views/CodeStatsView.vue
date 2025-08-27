@@ -84,8 +84,10 @@
                   {{ formatNumber(systemStats?.periodLines || 0) }}
                 </p>
               </div>
-              <div class="flex items-center justify-center" style="width: 25%;">
-                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+              <div class="flex items-center justify-center" style="width: 25%">
+                <div
+                  class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-600 text-white"
+                >
                   <i class="fas fa-edit text-xl" />
                 </div>
               </div>
@@ -102,8 +104,10 @@
                   {{ formatNumber(systemStats?.periodNewFiles || 0) }}
                 </p>
               </div>
-              <div class="flex items-center justify-center" style="width: 25%;">
-                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-purple-600 text-white">
+              <div class="flex items-center justify-center" style="width: 25%">
+                <div
+                  class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-purple-500 to-purple-600 text-white"
+                >
                   <i class="fas fa-file-plus text-xl" />
                 </div>
               </div>
@@ -120,8 +124,10 @@
                   {{ formatNumber(systemStats?.periodModifiedFiles || 0) }}
                 </p>
               </div>
-              <div class="flex items-center justify-center" style="width: 25%;">
-                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 text-white">
+              <div class="flex items-center justify-center" style="width: 25%">
+                <div
+                  class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-orange-500 to-orange-600 text-white"
+                >
                   <i class="fas fa-file-edit text-xl" />
                 </div>
               </div>
@@ -138,8 +144,10 @@
                   {{ formatNumber(activeUsersCount || 0) }}
                 </p>
               </div>
-              <div class="flex items-center justify-center" style="width: 25%;">
-                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 text-white">
+              <div class="flex items-center justify-center" style="width: 25%">
+                <div
+                  class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-emerald-500 to-emerald-600 text-white"
+                >
                   <i class="fas fa-users text-xl" />
                 </div>
               </div>
@@ -155,10 +163,14 @@
                 <p class="text-xl font-bold text-indigo-600 sm:text-2xl md:text-3xl">
                   {{ formatTokens(dashboardOverview?.todayTokens || 0) }}
                 </p>
-                <p class="text-sm font-medium text-green-600">{{ dashboardOverview?.totalCost || '$0.00' }}</p>
+                <p class="text-sm font-medium text-green-600">
+                  {{ dashboardOverview?.totalCost || '$0.00' }}
+                </p>
               </div>
-              <div class="flex items-center justify-center" style="width: 25%;">
-                <div class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 text-white">
+              <div class="flex items-center justify-center" style="width: 25%">
+                <div
+                  class="flex h-14 w-14 items-center justify-center rounded-lg bg-gradient-to-br from-indigo-500 to-indigo-600 text-white"
+                >
                   <i class="fas fa-coins text-xl" />
                 </div>
               </div>
@@ -1171,8 +1183,13 @@ function createLanguageChart() {
   }
 
   const ctx = languageChart.value.getContext('2d')
-  const languages = Object.keys(languageStats.value)
-  const lines = Object.values(languageStats.value).map((stat) => stat.lines || 0)
+  // 按行数从大到小排序
+  const sortedLanguages = Object.entries(languageStats.value)
+    .map(([lang, stat]) => ({ language: lang, lines: stat.lines || 0 }))
+    .sort((a, b) => b.lines - a.lines)
+
+  const languages = sortedLanguages.map((item) => item.language)
+  const lines = sortedLanguages.map((item) => item.lines)
 
   const colors = [
     'rgb(59, 130, 246)', // blue
@@ -1272,8 +1289,14 @@ function createToolDistributionChart() {
       ([toolName]) => toolName !== 'Unknown' && toolName !== 'undefined'
     )
   )
-  const tools = Object.keys(filteredTools)
-  const counts = Object.values(filteredTools).map((tool) => tool.totalCount || 0)
+
+  // 按调用次数从大到小排序
+  const sortedTools = Object.entries(filteredTools)
+    .map(([tool, data]) => ({ tool, count: data.totalCount || 0 }))
+    .sort((a, b) => b.count - a.count)
+
+  const tools = sortedTools.map((item) => item.tool)
+  const counts = sortedTools.map((item) => item.count)
 
   const colors = [
     'rgb(59, 130, 246)', // blue
