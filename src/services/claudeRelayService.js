@@ -914,6 +914,7 @@ class ClaudeRelayService {
         let buffer = ''
         const allUsageData = [] // 收集所有的usage事件
         let currentUsageData = {} // 当前正在收集的usage数据
+        const collectedContent = [] // 收集响应内容用于插件钩子
         let rateLimitDetected = false // 限流检测标志
 
         // 监听数据块，解析SSE并寻找usage信息
@@ -988,6 +989,61 @@ class ClaudeRelayService {
                       '📊 Collected input/cache data from message_start:',
                       JSON.stringify(currentUsageData)
                     )
+                  }
+
+                  // 捕获内容块开始
+                  if (data.type === 'content_block_start' && data.content_block) {
+                    collectedContent.push({
+                      index: data.index,
+                      type: data.content_block.type,
+                      name: data.content_block.name,
+                      input: data.content_block.input || {},
+                      text: '',
+                      inputJsonBuffer: '' // 用于累积拼接JSON字符串
+                    })
+                  }
+
+                  // 捕获内容块增量
+                  if (data.type === 'content_block_delta' && data.delta) {
+                    const contentIndex = data.index
+                    if (collectedContent[contentIndex]) {
+                      if (data.delta.type === 'text_delta' && data.delta.text) {
+                        collectedContent[contentIndex].text += data.delta.text
+                      } else if (
+                        data.delta.type === 'input_json_delta' &&
+                        data.delta.partial_json
+                      ) {
+                        // 累积拼接JSON字符串
+                        if (!collectedContent[contentIndex].inputJsonBuffer) {
+                          collectedContent[contentIndex].inputJsonBuffer = ''
+                        }
+                        collectedContent[contentIndex].inputJsonBuffer += data.delta.partial_json
+
+                        // 尝试解析完整JSON
+                        try {
+                          const completeInput = JSON.parse(
+                            collectedContent[contentIndex].inputJsonBuffer
+                          )
+                          collectedContent[contentIndex].input = completeInput
+                          logger.info(
+                            '📊 [Stream Capture] Successfully parsed complete input JSON',
+                            {
+                              inputKeys: Object.keys(completeInput),
+                              bufferLength: collectedContent[contentIndex].inputJsonBuffer.length
+                            }
+                          )
+                        } catch (e) {
+                          // JSON不完整，继续累积
+                          logger.debug(
+                            '📊 [Stream Capture] JSON incomplete, continuing to buffer',
+                            {
+                              error: e.message,
+                              bufferLength: collectedContent[contentIndex].inputJsonBuffer.length
+                            }
+                          )
+                        }
+                      }
+                    }
                   }
 
                   // message_delta包含最终的output tokens
@@ -1139,8 +1195,34 @@ class ClaudeRelayService {
               )
             }
 
+            // 构建完整的响应对象传递给插件
+            const response = {
+              content: collectedContent.map((item) => ({
+                type: 'tool_use',
+                name: item.name,
+                input: item.input
+              }))
+            }
+
+            logger.info('📊 [Claude Stream Capture] Final response for callback', {
+              responseContentLength: response.content.length,
+              responseContent: response.content.map((item) => ({
+                type: item.type,
+                name: item.name,
+                inputKeys: Object.keys(item.input || {}),
+                inputSample: Object.keys(item.input || {}).reduce((acc, key) => {
+                  acc[key] =
+                    typeof item.input[key] === 'string'
+                      ? item.input[key].substring(0, 100) +
+                        (item.input[key].length > 100 ? '...' : '')
+                      : item.input[key]
+                  return acc
+                }, {})
+              }))
+            })
+
             // 调用一次usageCallback记录合并后的数据
-            usageCallback(finalUsage)
+            usageCallback({ ...finalUsage, response })
           }
 
           // 处理限流状态

@@ -1,0 +1,125 @@
+# Claude Relay Service Docker Compose 配置 (源码构建版本)
+# 从源码构建，无需依赖外部镜像
+
+services:
+  # 🚀 Claude Relay Service (从源码构建)
+  claude-relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      # 构建参数（可选）
+      args:
+        - NODE_ENV=production
+    # 构建完成后的镜像名称（可选）
+    image: claude-relay-service:local
+    restart: unless-stopped
+    ports:
+      # 绑定地址：生产环境建议使用反向代理，设置 BIND_HOST=127.0.0.1
+      - "${BIND_HOST:-0.0.0.0}:${BIND_PORT:-3000}:3000"
+    # 🔑 使用 .env 文件配置
+    env_file:
+      - .env
+    environment:
+      # Docker特定配置
+      - REDIS_HOST=redis
+    volumes:
+      - ./logs:/app/logs
+      - ./data:/app/data
+      # 开发时可挂载配置文件（可选）
+      # - ./config/config.js:/app/config/config.js:ro
+    depends_on:
+      redis:
+        condition: service_healthy
+    networks:
+      - claude-relay-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s  # 给构建和启动更多时间
+
+  # 📊 Redis Database
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # 仅在容器网络内部暴露端口，不映射到主机
+    expose:
+      - "6379"
+    # 注意：如需本地调试访问，可取消下行注释（生产环境禁用）
+    ports:
+      - "6380:6379"
+    volumes:
+      - /home/doveliu/redis:/data
+    command: redis-server --save 60 1000 --save 300 10
+    networks:
+      - claude-relay-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # 🤖 代码统计截图定时任务服务
+  screenshot-scheduler:
+    build:
+      context: .
+      dockerfile: Dockerfile.screenshot
+    container_name: code-stats-screenshot
+    restart: unless-stopped
+    
+    # 🔑 使用 .env 文件配置
+    env_file:
+      - .env
+    environment:
+      # 服务地址配置（使用容器网络访问）
+      - BASE_URL=http://claude-relay:3000
+      # 时区设置
+      - TZ=Asia/Shanghai
+      # Python输出不缓冲
+      - PYTHONUNBUFFERED=1
+      
+    volumes:
+      # 挂载日志目录
+      - ./logs/screenshot:/app/logs
+      
+    depends_on:
+      - claude-relay
+      
+    networks:
+      - claude-relay-network
+      
+    # 资源限制
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '1'
+          memory: 1G
+          
+    # 日志配置
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import os; exit(0 if os.path.exists('/app/screenshot_scheduler.log') else 1)"]
+      interval: 5m
+      timeout: 10s
+      retries: 3
+      
+    # 安全选项（Chrome需要）
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
+    shm_size: 2gb  # 增加共享内存大小，解决Chrome崩溃问题
+
+networks:
+  claude-relay-network:
+    driver: bridge

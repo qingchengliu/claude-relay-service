@@ -75,6 +75,11 @@ class Application {
       const claudeAccountService = require('./services/claudeAccountService')
       await claudeAccountService.initializeSessionWindows()
 
+      // 🔌 插件系统初始化
+      logger.info('🔄 Initializing plugin system...')
+      const pluginLoader = require('../plugins/plugin-loader')
+      pluginLoader.init(this.app)
+
       // 超早期拦截 /admin-next/ 请求 - 在所有中间件之前
       this.app.use((req, res, next) => {
         if (req.path === '/admin-next/' && req.method === 'GET') {

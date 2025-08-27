@@ -141,6 +141,16 @@ const config = {
   development: {
     debug: process.env.DEBUG === 'true',
     hotReload: process.env.HOT_RELOAD === 'true'
+  },
+
+  // 🔌 插件系统配置
+  plugins: {
+    enabled: process.env.PLUGINS_ENABLED === 'true',
+    codeStatistics: {
+      enabled: process.env.CODE_STATS_ENABLED === 'true',
+      redisPrefix: process.env.CODE_STATS_REDIS_PREFIX || 'code_stats:',
+      webPath: process.env.CODE_STATS_WEB_PATH || '/admin/code-statistics'
+    }
   }
 }
 
