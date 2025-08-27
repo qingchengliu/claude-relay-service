@@ -56,10 +56,17 @@ class CodeStatsScreenshotScheduler:
         self.driver = None
         self.auth_token = None
         
+        # 浏览器预热标志
+        self._browser_preheated = False
+        self._preheated_driver = None
+        
         if not self.webhook_url:
             raise ValueError("请在.env文件中配置WEIXIN_WEBHOOK_URL")
         
         logger.info(f"初始化完成 - 服务地址: {self.base_url}")
+        
+        # 在初始化时预热浏览器（异步）
+        self._preheat_browser()
     
     def _load_admin_credentials(self):
         """从环境变量读取管理员凭据"""
@@ -74,70 +81,206 @@ class CodeStatsScreenshotScheduler:
             'password': password
         }
     
+    def _preheat_browser(self):
+        """预热浏览器实例"""
+        try:
+            import threading
+            
+            def preheat():
+                try:
+                    logger.info("开始预热浏览器...")
+                    
+                    # 判断是否在Docker环境中
+                    is_docker = os.path.exists('/.dockerenv') or os.getenv('DOCKER_CONTAINER', False)
+                    
+                    # 获取Chrome配置
+                    chrome_options = self._get_chrome_options(is_docker)
+                    service = self._get_chrome_driver_service(is_docker)
+                    
+                    # 创建浏览器实例
+                    self._preheated_driver = webdriver.Chrome(service=service, options=chrome_options)
+                    self._preheated_driver.set_window_size(1920, 1080)
+                    
+                    # 访问一个简单页面来完全初始化
+                    self._preheated_driver.get("data:text/html,<html><body>Browser preheated</body></html>")
+                    
+                    self._browser_preheated = True
+                    logger.info("浏览器预热完成")
+                    
+                except Exception as e:
+                    logger.warning(f"浏览器预热失败: {e}")
+                    self._browser_preheated = False
+                    if self._preheated_driver:
+                        try:
+                            self._preheated_driver.quit()
+                        except:
+                            pass
+                        self._preheated_driver = None
+            
+            # 在后台线程中预热
+            threading.Thread(target=preheat, daemon=True).start()
+            
+        except Exception as e:
+            logger.warning(f"无法启动浏览器预热: {e}")
+    
+    def _get_chrome_options(self, is_docker):
+        """获取Chrome配置选项"""
+        chrome_options = Options()
+        
+        if is_docker:
+            # Docker环境特殊配置
+            chrome_options.add_argument('--headless=new')  # 使用新版headless模式
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+            chrome_options.add_argument('--disable-extensions')
+            chrome_options.add_argument('--disable-plugins')
+            # chrome_options.add_argument('--disable-images')  # 截图需要图片
+            # chrome_options.add_argument('--disable-javascript')  # 截图需要JS交互
+            chrome_options.add_argument('--disable-plugins-discovery')
+            chrome_options.add_argument('--disable-preconnect')
+            chrome_options.add_argument('--disable-background-timer-throttling')
+            chrome_options.add_argument('--disable-backgrounding-occluded-windows')
+            chrome_options.add_argument('--disable-renderer-backgrounding')
+            chrome_options.add_argument('--disable-features=TranslateUI')
+            chrome_options.add_argument('--disable-ipc-flooding-protection')
+            chrome_options.add_argument('--no-first-run')
+            chrome_options.add_argument('--no-default-browser-check')
+            chrome_options.add_argument('--no-zygote')
+            chrome_options.add_argument('--disable-default-apps')
+            chrome_options.add_argument('--enable-logging')
+            chrome_options.add_argument('--log-level=0')
+            chrome_options.add_argument('--v=1')
+            chrome_options.add_argument('--disable-background-mode')
+            chrome_options.add_argument('--disable-background-networking')
+            chrome_options.add_argument('--disable-client-side-phishing-detection')
+            chrome_options.add_argument('--disable-sync')
+            chrome_options.add_argument('--metrics-recording-only')
+            chrome_options.add_argument('--no-report-upload')
+            chrome_options.add_argument('--disable-crash-reporter')
+            chrome_options.add_argument('--disable-hang-monitor')
+            chrome_options.add_argument('--disable-prompt-on-repost')
+            chrome_options.add_argument('--disable-web-resources')
+            chrome_options.add_argument('--disable-component-update')
+            chrome_options.add_argument('--disable-domain-reliability')
+            # 移除可能导致问题的参数
+            # chrome_options.add_argument('--single-process')  # 移除单进程模式
+            # chrome_options.add_argument('--remote-debugging-port=9222')  # 移除调试端口
+            
+            # 设置Chrome二进制位置
+            chrome_options.binary_location = '/usr/bin/google-chrome-stable'
+        else:
+            # 本地环境配置
+            chrome_options.add_argument('--headless=new')  # 使用新版无头模式
+            chrome_options.add_argument('--no-sandbox')
+            chrome_options.add_argument('--disable-dev-shm-usage')
+            chrome_options.add_argument('--disable-gpu')
+            chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+            chrome_options.add_argument('--no-first-run')
+        
+        # 通用配置
+        chrome_options.add_argument('--window-size=1920,1080')
+        chrome_options.add_argument('--disable-web-security')
+        chrome_options.add_argument('--force-device-scale-factor=1')  # 防止缩放问题
+        
+        # 字体配置
+        chrome_options.add_argument('--font-render-hinting=none')
+        chrome_options.add_argument('--disable-font-subpixel-positioning')
+        chrome_options.add_argument('--lang=zh-CN')
+        
+        # 强制使用系统字体
+        prefs = {
+            "profile.default_content_settings.popups": 0,
+            "profile.default_content_setting_values.notifications": 2,
+            "webkit.webprefs.fonts.standard.Hans": "WenQuanYi Zen Hei",
+            "webkit.webprefs.fonts.serif.Hans": "WenQuanYi Zen Hei", 
+            "webkit.webprefs.fonts.sansserif.Hans": "WenQuanYi Zen Hei",
+            "webkit.webprefs.fonts.fixed.Hans": "WenQuanYi Zen Hei Mono"
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        
+        # Windows特殊处理
+        import platform
+        if platform.system() == 'Windows':
+            chrome_options.add_argument('--disable-software-rasterizer')
+        
+        return chrome_options
+    
+    def _get_chrome_driver_service(self, is_docker):
+        """获取Chrome驱动服务"""
+        import socket
+        
+        # 设置网络超时
+        socket.setdefaulttimeout(30)
+        
+        if is_docker:
+            # Docker环境：优先使用预安装的ChromeDriver
+            chrome_driver_paths = [
+                '/usr/bin/chromedriver',
+                '/usr/local/bin/chromedriver',
+                '/opt/chrome/chromedriver'
+            ]
+            
+            for driver_path in chrome_driver_paths:
+                if os.path.exists(driver_path):
+                    logger.info(f"使用预安装的ChromeDriver: {driver_path}")
+                    return Service(driver_path)
+            
+            logger.info("未找到预安装的ChromeDriver，使用webdriver-manager")
+        
+        # 配置webdriver-manager缓存和超时
+        cache_dir = "/app/.wdm" if is_docker else os.path.expanduser("~/.wdm")
+        os.makedirs(cache_dir, exist_ok=True)
+        
+        try:
+            driver_manager = ChromeDriverManager(
+                cache_valid_range=30,  # 缓存有效期30天
+                path=cache_dir
+            )
+            
+            # 使用较短超时时间下载驱动
+            import requests
+            original_timeout = requests.adapters.DEFAULT_TIMEOUT
+            requests.adapters.DEFAULT_TIMEOUT = 30
+            
+            try:
+                driver_path = driver_manager.install()
+                logger.info(f"ChromeDriver安装成功: {driver_path}")
+                return Service(driver_path)
+            finally:
+                requests.adapters.DEFAULT_TIMEOUT = original_timeout
+                
+        except Exception as e:
+            logger.warning(f"webdriver-manager失败: {e}")
+            # 最后尝试系统PATH中的chromedriver
+            return Service()
+    
     def _setup_driver(self):
         """设置Chrome浏览器驱动"""
         try:
-            chrome_options = Options()
+            # 优先使用预热的浏览器
+            if self._browser_preheated and self._preheated_driver:
+                logger.info("使用预热的浏览器实例")
+                self.driver = self._preheated_driver
+                self._preheated_driver = None  # 避免重复使用
+                self._browser_preheated = False
+                return
+            
+            logger.info("创建新的浏览器实例")
             
             # 判断是否在Docker环境中
             is_docker = os.path.exists('/.dockerenv') or os.getenv('DOCKER_CONTAINER', False)
             
-            if is_docker:
-                # Docker环境特殊配置
-                chrome_options.add_argument('--headless')  # 必须使用headless模式
-                chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--disable-dev-shm-usage')
-                chrome_options.add_argument('--disable-gpu')
-                chrome_options.add_argument('--disable-features=VizDisplayCompositor')
-                chrome_options.add_argument('--remote-debugging-port=9222')
-                chrome_options.binary_location = '/usr/bin/google-chrome-stable'
-            else:
-                # 本地环境配置
-                chrome_options.add_argument('--headless=new')  # 使用新版无头模式
-                chrome_options.add_argument('--no-sandbox')
-                chrome_options.add_argument('--disable-dev-shm-usage')
-                chrome_options.add_argument('--disable-gpu')
-                chrome_options.add_argument('--disable-features=VizDisplayCompositor')
+            # 获取Chrome配置和服务
+            chrome_options = self._get_chrome_options(is_docker)
             
-            # 通用配置
-            chrome_options.add_argument('--window-size=1920,1080')
-            chrome_options.add_argument('--disable-web-security')
-            chrome_options.add_argument('--force-device-scale-factor=1')  # 防止缩放问题
-            
-            # 字体配置
-            chrome_options.add_argument('--font-render-hinting=none')
-            chrome_options.add_argument('--disable-font-subpixel-positioning')
-            chrome_options.add_argument('--lang=zh-CN')
-            
-            # 强制使用系统字体
-            prefs = {
-                "profile.default_content_settings.popups": 0,
-                "profile.default_content_setting_values.notifications": 2,
-                "webkit.webprefs.fonts.standard.Hans": "WenQuanYi Zen Hei",
-                "webkit.webprefs.fonts.serif.Hans": "WenQuanYi Zen Hei", 
-                "webkit.webprefs.fonts.sansserif.Hans": "WenQuanYi Zen Hei",
-                "webkit.webprefs.fonts.fixed.Hans": "WenQuanYi Zen Hei Mono"
-            }
-            chrome_options.add_experimental_option("prefs", prefs)
-            
-            # Windows特殊处理
-            import platform
-            if platform.system() == 'Windows':
-                chrome_options.add_argument('--disable-software-rasterizer')
-            
-            # 自动下载并管理ChromeDriver
+            # 获取Chrome驱动服务
             try:
-                if is_docker:
-                    # Docker环境直接使用Chrome
-                    self.driver = webdriver.Chrome(options=chrome_options)
-                else:
-                    # 本地环境使用webdriver_manager
-                    driver_path = ChromeDriverManager().install()
-                    service = Service(driver_path)
-                    self.driver = webdriver.Chrome(service=service, options=chrome_options)
+                service = self._get_chrome_driver_service(is_docker)
+                self.driver = webdriver.Chrome(service=service, options=chrome_options)
             except Exception as e:
-                logger.warning(f"首选驱动方式失败: {e}，尝试备选方案")
-                # 如果失败，尝试直接使用webdriver
+                logger.warning(f"使用Service失败: {e}，尝试直接初始化")
                 self.driver = webdriver.Chrome(options=chrome_options)
             
             self.driver.set_window_size(1920, 1080)

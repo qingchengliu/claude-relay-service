@@ -118,6 +118,7 @@ services:
       - seccomp:unconfined
     cap_add:
       - SYS_ADMIN
+    shm_size: 2gb  # 增加共享内存大小，解决Chrome崩溃问题
 
 networks:
   claude-relay-network:

@@ -56,13 +56,22 @@ RUN dpkg -i /tmp/google-chrome-stable_current_amd64.deb || apt-get update && apt
     && chmod 644 /usr/share/fonts/truetype/simsun.ttf \
     && rm -rf /var/lib/apt/lists/*
 
+# 预安装ChromeDriver避免网络下载 - 使用本地缓存
+COPY docker/cache/chromedriver_linux64.zip /tmp/chromedriver.zip
+RUN unzip /tmp/chromedriver.zip -d /tmp/ \
+    && chmod +x /tmp/chromedriver-linux64/chromedriver \
+    && mv /tmp/chromedriver-linux64/chromedriver /usr/bin/chromedriver \
+    && rm -rf /tmp/chromedriver.zip /tmp/chromedriver-linux64 \
+    && echo "ChromeDriver安装完成: $(chromedriver --version)"
+
 # 配置中文字体和emoji
 RUN fc-cache -fv \
     && fc-list | grep -i "simsun\|emoji" | head -4
 
 # 设置Chrome的环境变量和字体
 ENV CHROME_BIN=/usr/bin/google-chrome-stable \
-    CHROME_PATH=/usr/bin/google-chrome-stable
+    CHROME_PATH=/usr/bin/google-chrome-stable \
+    CHROMEDRIVER_PATH=/usr/bin/chromedriver
 
 # 复制Python依赖文件
 COPY requirements.txt .
@@ -74,8 +83,8 @@ RUN pip config set global.index-url https://mirrors.aliyun.com/pypi/simple/ && \
 # 复制项目文件
 COPY screenshot_scheduler.py .
 
-# 创建日志目录
-RUN mkdir -p /app/logs
+# 创建日志目录和webdriver缓存目录
+RUN mkdir -p /app/logs /app/.wdm
 
 # 设置时区为上海
 ENV TZ=Asia/Shanghai
