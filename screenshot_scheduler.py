@@ -473,10 +473,57 @@ class CodeStatsScreenshotScheduler:
                     )
                     element_width = size['width']
                     
-                    logger.info(f"内容区域尺寸: {element_width}x{element_height}px")
+                    # 尝试找到更精确的内容区域，减少左右留白
+                    try:
+                        # 优先查找mb-8类的元素（代码统计页面的主要内容区域）
+                        primary_content_selectors = [
+                            (By.XPATH, "//div[contains(@class, 'mb-8') and contains(@class, 'flex')]"),
+                            (By.XPATH, "//div[contains(@class, 'mb-8')]"),
+                            (By.XPATH, "//div[contains(@class, 'max-w-7xl')]"),
+                            (By.CLASS_NAME, "mb-8"),
+                        ]
+                        
+                        precise_element = None
+                        for selector_type, selector_value in primary_content_selectors:
+                            try:
+                                elements = tab_content_element.find_elements(selector_type, selector_value)
+                                # 选择第一个可见的mb-8元素
+                                for elem in elements:
+                                    if elem.is_displayed() and elem.size['width'] > 300:
+                                        precise_element = elem
+                                        logger.info(f"找到精确内容区域: {selector_value}")
+                                        break
+                                if precise_element:
+                                    break
+                            except:
+                                continue
+                        
+                        if precise_element:
+                            # 使用精确元素的尺寸
+                            precise_size = precise_element.size
+                            precise_location = precise_element.location_once_scrolled_into_view
+                            
+                            # 使用精确元素的宽度，加适当边距
+                            element_width = precise_size['width'] + 40  # 减少边距
+                            
+                            # 滚动到精确元素
+                            self.driver.execute_script("arguments[0].scrollIntoView(true);", precise_element)
+                            time.sleep(1)
+                            
+                            logger.info(f"使用精确内容区域宽度: {element_width}px")
+                        else:
+                            # 如果没找到精确元素，使用原始逻辑但减少宽度
+                            element_width = min(size['width'], 1200)  # 限制最大宽度
+                            logger.info(f"未找到精确内容区域，使用限制宽度: {element_width}px")
+                            
+                    except Exception as e:
+                        logger.debug(f"查找精确内容区域失败: {e}")
+                        element_width = min(size['width'], 1200)  # 降级处理
                     
-                    # 设置窗口大小以容纳整个元素
-                    self.driver.set_window_size(element_width + 100, element_height + 200)
+                    logger.info(f"最终内容区域尺寸: {element_width}x{element_height}px")
+                    
+                    # 设置窗口大小，减少额外宽度
+                    self.driver.set_window_size(element_width + 50, element_height + 200)  # 减少左右边距从100到50
                     time.sleep(2)
                     
                     # 截取元素截图
@@ -713,33 +760,28 @@ class CodeStatsScreenshotScheduler:
         logger.info("启动定时任务调度器")
         
         # 配置定时任务
-        schedule.every().monday.at("12:00").do(self._execute_task, 'today')
-        schedule.every().monday.at("16:00").do(self._execute_task, 'today')
+        schedule.every().monday.at("15:30").do(self._execute_task, 'today')
         schedule.every().monday.at("18:30").do(self._execute_task, 'today')
         schedule.every().monday.at("21:30").do(self._execute_task, 'today')
         
-        schedule.every().tuesday.at("12:00").do(self._execute_task, 'today')
-        schedule.every().tuesday.at("16:00").do(self._execute_task, 'today')
+        schedule.every().tuesday.at("15:30").do(self._execute_task, 'today')
         schedule.every().tuesday.at("18:30").do(self._execute_task, 'today')
         schedule.every().tuesday.at("21:30").do(self._execute_task, 'today')
         
-        schedule.every().wednesday.at("12:00").do(self._execute_task, 'today')
-        schedule.every().wednesday.at("16:00").do(self._execute_task, 'today')
+        schedule.every().wednesday.at("15:30").do(self._execute_task, 'today')
         schedule.every().wednesday.at("18:30").do(self._execute_task, 'today')
         schedule.every().wednesday.at("21:30").do(self._execute_task, 'today')
         
-        schedule.every().thursday.at("12:00").do(self._execute_task, 'today')
-        schedule.every().thursday.at("16:00").do(self._execute_task, 'today')
+        schedule.every().thursday.at("15:30").do(self._execute_task, 'today')
         schedule.every().thursday.at("18:30").do(self._execute_task, 'today')
         schedule.every().thursday.at("21:30").do(self._execute_task, 'today')
         
-        schedule.every().friday.at("12:00").do(self._execute_task, 'today')
-        schedule.every().friday.at("16:00").do(self._execute_task, 'today')
+        schedule.every().friday.at("15:30").do(self._execute_task, 'today')
         schedule.every().friday.at("18:30").do(self._execute_task, 'today')
         schedule.every().friday.at("21:30").do(self._execute_task, 'week')  # 周五21:30生成周报
         
         logger.info("定时任务配置完成:")
-        logger.info("- 周一到周五 12:00, 16:00, 18:30: 今日统计")
+        logger.info("- 周一到周五 15:30, 18:30: 今日统计")
         logger.info("- 周一到周四 21:30: 今日统计")
         logger.info("- 周五 21:30: 近7天统计")
         
