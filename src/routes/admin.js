@@ -24,6 +24,68 @@ const ProxyHelper = require('../utils/proxyHelper')
 
 const router = express.Router()
 
+// 👥 用户管理
+
+// 获取所有用户列表（用于API Key分配）
+router.get('/users', authenticateAdmin, async (req, res) => {
+  try {
+    const userService = require('../services/userService')
+
+    // Extract query parameters for filtering
+    const { role, isActive } = req.query
+    const options = { limit: 1000 }
+
+    // Apply role filter if provided
+    if (role) {
+      options.role = role
+    }
+
+    // Apply isActive filter if provided, otherwise default to active users only
+    if (isActive !== undefined) {
+      options.isActive = isActive === 'true'
+    } else {
+      options.isActive = true // Default to active users for backwards compatibility
+    }
+
+    const result = await userService.getAllUsers(options)
+
+    // Extract users array from the paginated result
+    const allUsers = result.users || []
+
+    // Map to the format needed for the dropdown
+    const activeUsers = allUsers.map((user) => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.displayName || user.username,
+      email: user.email,
+      role: user.role
+    }))
+
+    // 添加Admin选项作为第一个
+    const usersWithAdmin = [
+      {
+        id: 'admin',
+        username: 'admin',
+        displayName: 'Admin',
+        email: '',
+        role: 'admin'
+      },
+      ...activeUsers
+    ]
+
+    return res.json({
+      success: true,
+      data: usersWithAdmin
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get users list:', error)
+    return res.status(500).json({
+      error: 'Failed to get users list',
+      message: error.message
+    })
+  }
+})
+
 // 🔑 API Keys 管理
 
 // 调试：获取API Key费用详情
@@ -62,6 +124,9 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
   try {
     const { timeRange = 'all' } = req.query // all, 7days, monthly
     const apiKeys = await apiKeyService.getAllApiKeys()
+
+    // 获取用户服务来补充owner信息
+    const userService = require('../services/userService')
 
     // 根据时间范围计算查询模式
     const now = new Date()
@@ -310,6 +375,28 @@ router.get('/api-keys', authenticateAdmin, async (req, res) => {
 
         // 为了保持兼容性，也更新total字段
         apiKey.usage.total = apiKey.usage[timeRange]
+      }
+    }
+
+    // 为每个API Key添加owner的displayName
+    for (const apiKey of apiKeys) {
+      // 如果API Key有关联的用户ID，获取用户信息
+      if (apiKey.userId) {
+        try {
+          const user = await userService.getUserById(apiKey.userId, false)
+          if (user) {
+            apiKey.ownerDisplayName = user.displayName || user.username || 'Unknown User'
+          } else {
+            apiKey.ownerDisplayName = 'Unknown User'
+          }
+        } catch (error) {
+          logger.debug(`无法获取用户 ${apiKey.userId} 的信息:`, error)
+          apiKey.ownerDisplayName = 'Unknown User'
+        }
+      } else {
+        // 如果没有userId，使用createdBy字段或默认为Admin
+        apiKey.ownerDisplayName =
+          apiKey.createdBy === 'admin' ? 'Admin' : apiKey.createdBy || 'Admin'
       }
     }
 
@@ -679,6 +766,9 @@ router.put('/api-keys/batch', authenticateAdmin, async (req, res) => {
         if (updates.tokenLimit !== undefined) {
           finalUpdates.tokenLimit = updates.tokenLimit
         }
+        if (updates.rateLimitCost !== undefined) {
+          finalUpdates.rateLimitCost = updates.rateLimitCost
+        }
         if (updates.concurrencyLimit !== undefined) {
           finalUpdates.concurrencyLimit = updates.concurrencyLimit
         }
@@ -800,6 +890,7 @@ router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
   try {
     const { keyId } = req.params
     const {
+      name, // 添加名称字段
       tokenLimit,
       concurrencyLimit,
       rateLimitWindow,
@@ -819,11 +910,24 @@ router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
       expiresAt,
       dailyCostLimit,
       weeklyOpusCostLimit,
-      tags
+      tags,
+      ownerId // 新增：所有者ID字段
     } = req.body
 
     // 只允许更新指定字段
     const updates = {}
+
+    // 处理名称字段
+    if (name !== undefined && name !== null && name !== '') {
+      const trimmedName = name.toString().trim()
+      if (trimmedName.length === 0) {
+        return res.status(400).json({ error: 'API Key name cannot be empty' })
+      }
+      if (trimmedName.length > 100) {
+        return res.status(400).json({ error: 'API Key name must be less than 100 characters' })
+      }
+      updates.name = trimmedName
+    }
 
     if (tokenLimit !== undefined && tokenLimit !== null && tokenLimit !== '') {
       if (!Number.isInteger(Number(tokenLimit)) || Number(tokenLimit) < 0) {
@@ -989,6 +1093,45 @@ router.put('/api-keys/:keyId', authenticateAdmin, async (req, res) => {
       updates.isActive = isActive
     }
 
+    // 处理所有者变更
+    if (ownerId !== undefined) {
+      const userService = require('../services/userService')
+
+      if (ownerId === 'admin') {
+        // 分配给Admin
+        updates.userId = ''
+        updates.userUsername = ''
+        updates.createdBy = 'admin'
+      } else if (ownerId) {
+        // 分配给用户
+        try {
+          const user = await userService.getUserById(ownerId, false)
+          if (!user) {
+            return res.status(400).json({ error: 'Invalid owner: User not found' })
+          }
+          if (!user.isActive) {
+            return res.status(400).json({ error: 'Cannot assign to inactive user' })
+          }
+
+          // 设置新的所有者信息
+          updates.userId = ownerId
+          updates.userUsername = user.username
+          updates.createdBy = user.username
+
+          // 管理员重新分配时，不检查用户的API Key数量限制
+          logger.info(`🔄 Admin reassigning API key ${keyId} to user ${user.username}`)
+        } catch (error) {
+          logger.error('Error fetching user for owner reassignment:', error)
+          return res.status(400).json({ error: 'Invalid owner ID' })
+        }
+      } else {
+        // 清空所有者（分配给Admin）
+        updates.userId = ''
+        updates.userUsername = ''
+        updates.createdBy = 'admin'
+      }
+    }
+
     await apiKeyService.updateApiKey(keyId, updates)
 
     logger.success(`📝 Admin updated API key: ${keyId}`)
@@ -1125,7 +1268,7 @@ router.get('/api-keys/deleted', authenticateAdmin, async (req, res) => {
       deletedAt: key.deletedAt,
       deletedBy: key.deletedBy,
       deletedByType: key.deletedByType,
-      canRestore: false // Deleted keys cannot be restored per requirement
+      canRestore: true // 已删除的API Key可以恢复
     }))
 
     logger.success(`📋 Admin retrieved ${enrichedKeys.length} deleted API keys`)
@@ -1135,6 +1278,123 @@ router.get('/api-keys/deleted', authenticateAdmin, async (req, res) => {
     return res
       .status(500)
       .json({ error: 'Failed to retrieve deleted API keys', message: error.message })
+  }
+})
+
+// 🔄 恢复已删除的API Key
+router.post('/api-keys/:keyId/restore', authenticateAdmin, async (req, res) => {
+  try {
+    const { keyId } = req.params
+    const adminUsername = req.session?.admin?.username || 'unknown'
+
+    // 调用服务层的恢复方法
+    const result = await apiKeyService.restoreApiKey(keyId, adminUsername, 'admin')
+
+    if (result.success) {
+      logger.success(`✅ Admin ${adminUsername} restored API key: ${keyId}`)
+      return res.json({
+        success: true,
+        message: 'API Key 已成功恢复',
+        apiKey: result.apiKey
+      })
+    } else {
+      return res.status(400).json({
+        success: false,
+        error: 'Failed to restore API key'
+      })
+    }
+  } catch (error) {
+    logger.error('❌ Failed to restore API key:', error)
+
+    // 根据错误类型返回适当的响应
+    if (error.message === 'API key not found') {
+      return res.status(404).json({
+        success: false,
+        error: 'API Key 不存在'
+      })
+    } else if (error.message === 'API key is not deleted') {
+      return res.status(400).json({
+        success: false,
+        error: '该 API Key 未被删除，无需恢复'
+      })
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: '恢复 API Key 失败',
+      message: error.message
+    })
+  }
+})
+
+// 🗑️ 彻底删除API Key（物理删除）
+router.delete('/api-keys/:keyId/permanent', authenticateAdmin, async (req, res) => {
+  try {
+    const { keyId } = req.params
+    const adminUsername = req.session?.admin?.username || 'unknown'
+
+    // 调用服务层的彻底删除方法
+    const result = await apiKeyService.permanentDeleteApiKey(keyId)
+
+    if (result.success) {
+      logger.success(`🗑️ Admin ${adminUsername} permanently deleted API key: ${keyId}`)
+      return res.json({
+        success: true,
+        message: 'API Key 已彻底删除'
+      })
+    }
+  } catch (error) {
+    logger.error('❌ Failed to permanently delete API key:', error)
+
+    if (error.message === 'API key not found') {
+      return res.status(404).json({
+        success: false,
+        error: 'API Key 不存在'
+      })
+    } else if (error.message === '只能彻底删除已经删除的API Key') {
+      return res.status(400).json({
+        success: false,
+        error: '只能彻底删除已经删除的API Key'
+      })
+    }
+
+    return res.status(500).json({
+      success: false,
+      error: '彻底删除 API Key 失败',
+      message: error.message
+    })
+  }
+})
+
+// 🧹 清空所有已删除的API Keys
+router.delete('/api-keys/deleted/clear-all', authenticateAdmin, async (req, res) => {
+  try {
+    const adminUsername = req.session?.admin?.username || 'unknown'
+
+    // 调用服务层的清空方法
+    const result = await apiKeyService.clearAllDeletedApiKeys()
+
+    logger.success(
+      `🧹 Admin ${adminUsername} cleared deleted API keys: ${result.successCount}/${result.total}`
+    )
+
+    return res.json({
+      success: true,
+      message: `成功清空 ${result.successCount} 个已删除的 API Keys`,
+      details: {
+        total: result.total,
+        successCount: result.successCount,
+        failedCount: result.failedCount,
+        errors: result.errors
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to clear all deleted API keys:', error)
+    return res.status(500).json({
+      success: false,
+      error: '清空已删除的 API Keys 失败',
+      message: error.message
+    })
   }
 })
 
@@ -1510,15 +1770,18 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
     if (groupId && groupId !== 'all') {
       if (groupId === 'ungrouped') {
         // 筛选未分组账户
-        accounts = accounts.filter(
-          (account) => !account.groupInfos || account.groupInfos.length === 0
-        )
+        const filteredAccounts = []
+        for (const account of accounts) {
+          const groups = await accountGroupService.getAccountGroups(account.id)
+          if (!groups || groups.length === 0) {
+            filteredAccounts.push(account)
+          }
+        }
+        accounts = filteredAccounts
       } else {
         // 筛选特定分组的账户
-        accounts = accounts.filter(
-          (account) =>
-            account.groupInfos && account.groupInfos.some((group) => group.id === groupId)
-        )
+        const groupMembers = await accountGroupService.getGroupMembers(groupId)
+        accounts = accounts.filter((account) => groupMembers.includes(account.id))
       }
     }
 
@@ -1527,7 +1790,7 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
       accounts.map(async (account) => {
         try {
           const usageStats = await redis.getAccountUsageStats(account.id)
-          const groupInfos = await accountGroupService.getAccountGroup(account.id)
+          const groupInfos = await accountGroupService.getAccountGroups(account.id)
 
           // 获取会话窗口使用统计（仅对有活跃窗口的账户）
           let sessionWindowUsage = null
@@ -1585,7 +1848,7 @@ router.get('/claude-accounts', authenticateAdmin, async (req, res) => {
           logger.warn(`⚠️ Failed to get usage stats for account ${account.id}:`, statsError.message)
           // 如果获取统计失败，返回空统计
           try {
-            const groupInfos = await accountGroupService.getAccountGroup(account.id)
+            const groupInfos = await accountGroupService.getAccountGroups(account.id)
             return {
               ...account,
               groupInfos,
@@ -1638,6 +1901,7 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
       platform = 'claude',
       priority,
       groupId,
+      groupIds,
       autoStopOnWarning
     } = req.body
 
@@ -1652,9 +1916,11 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
         .json({ error: 'Invalid account type. Must be "shared", "dedicated" or "group"' })
     }
 
-    // 如果是分组类型，验证groupId
-    if (accountType === 'group' && !groupId) {
-      return res.status(400).json({ error: 'Group ID is required for group type accounts' })
+    // 如果是分组类型，验证groupId或groupIds
+    if (accountType === 'group' && !groupId && (!groupIds || groupIds.length === 0)) {
+      return res
+        .status(400)
+        .json({ error: 'Group ID or Group IDs are required for group type accounts' })
     }
 
     // 验证priority的有效性
@@ -1680,8 +1946,14 @@ router.post('/claude-accounts', authenticateAdmin, async (req, res) => {
     })
 
     // 如果是分组类型，将账户添加到分组
-    if (accountType === 'group' && groupId) {
-      await accountGroupService.addAccountToGroup(newAccount.id, groupId, newAccount.platform)
+    if (accountType === 'group') {
+      if (groupIds && groupIds.length > 0) {
+        // 使用多分组设置
+        await accountGroupService.setAccountGroups(newAccount.id, groupIds, newAccount.platform)
+      } else if (groupId) {
+        // 兼容单分组模式
+        await accountGroupService.addAccountToGroup(newAccount.id, groupId, newAccount.platform)
+      }
     }
 
     logger.success(`🏢 Admin created new Claude account: ${name} (${accountType || 'shared'})`)
@@ -1715,9 +1987,15 @@ router.put('/claude-accounts/:accountId', authenticateAdmin, async (req, res) =>
         .json({ error: 'Invalid account type. Must be "shared", "dedicated" or "group"' })
     }
 
-    // 如果更新为分组类型，验证groupId
-    if (updates.accountType === 'group' && !updates.groupId) {
-      return res.status(400).json({ error: 'Group ID is required for group type accounts' })
+    // 如果更新为分组类型，验证groupId或groupIds
+    if (
+      updates.accountType === 'group' &&
+      !updates.groupId &&
+      (!updates.groupIds || updates.groupIds.length === 0)
+    ) {
+      return res
+        .status(400)
+        .json({ error: 'Group ID or Group IDs are required for group type accounts' })
     }
 
     // 获取账户当前信息以处理分组变更
@@ -1730,16 +2008,24 @@ router.put('/claude-accounts/:accountId', authenticateAdmin, async (req, res) =>
     if (updates.accountType !== undefined) {
       // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroups = await accountGroupService.getAccountGroup(accountId)
-        for (const oldGroup of oldGroups) {
-          await accountGroupService.removeAccountFromGroup(accountId, oldGroup.id)
-        }
+        await accountGroupService.removeAccountFromAllGroups(accountId)
       }
 
       // 如果新类型是分组，添加到新分组
-      if (updates.accountType === 'group' && updates.groupId) {
-        // 从路由知道这是 Claude OAuth 账户，平台为 'claude'
-        await accountGroupService.addAccountToGroup(accountId, updates.groupId, 'claude')
+      if (updates.accountType === 'group') {
+        // 处理多分组/单分组的兼容性
+        if (Object.prototype.hasOwnProperty.call(updates, 'groupIds')) {
+          if (updates.groupIds && updates.groupIds.length > 0) {
+            // 使用多分组设置
+            await accountGroupService.setAccountGroups(accountId, updates.groupIds, 'claude')
+          } else {
+            // groupIds 为空数组，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(accountId)
+          }
+        } else if (updates.groupId) {
+          // 兼容单分组模式
+          await accountGroupService.addAccountToGroup(accountId, updates.groupId, 'claude')
+        }
       }
     }
 
@@ -1913,15 +2199,18 @@ router.get('/claude-console-accounts', authenticateAdmin, async (req, res) => {
     if (groupId && groupId !== 'all') {
       if (groupId === 'ungrouped') {
         // 筛选未分组账户
-        accounts = accounts.filter(
-          (account) => !account.groupInfos || account.groupInfos.length === 0
-        )
+        const filteredAccounts = []
+        for (const account of accounts) {
+          const groups = await accountGroupService.getAccountGroups(account.id)
+          if (!groups || groups.length === 0) {
+            filteredAccounts.push(account)
+          }
+        }
+        accounts = filteredAccounts
       } else {
         // 筛选特定分组的账户
-        accounts = accounts.filter(
-          (account) =>
-            account.groupInfos && account.groupInfos.some((group) => group.id === groupId)
-        )
+        const groupMembers = await accountGroupService.getGroupMembers(groupId)
+        accounts = accounts.filter((account) => groupMembers.includes(account.id))
       }
     }
 
@@ -1930,7 +2219,7 @@ router.get('/claude-console-accounts', authenticateAdmin, async (req, res) => {
       accounts.map(async (account) => {
         try {
           const usageStats = await redis.getAccountUsageStats(account.id)
-          const groupInfos = await accountGroupService.getAccountGroup(account.id)
+          const groupInfos = await accountGroupService.getAccountGroups(account.id)
 
           return {
             ...account,
@@ -1949,7 +2238,7 @@ router.get('/claude-console-accounts', authenticateAdmin, async (req, res) => {
             statsError.message
           )
           try {
-            const groupInfos = await accountGroupService.getAccountGroup(account.id)
+            const groupInfos = await accountGroupService.getAccountGroups(account.id)
             return {
               ...account,
               // 转换schedulable为布尔值
@@ -2043,7 +2332,7 @@ router.post('/claude-console-accounts', authenticateAdmin, async (req, res) => {
 
     // 如果是分组类型，将账户添加到分组
     if (accountType === 'group' && groupId) {
-      await accountGroupService.addAccountToGroup(newAccount.id, groupId, 'claude')
+      await accountGroupService.addAccountToGroup(newAccount.id, groupId)
     }
 
     logger.success(`🎮 Admin created Claude Console account: ${name}`)
@@ -2089,15 +2378,26 @@ router.put('/claude-console-accounts/:accountId', authenticateAdmin, async (req,
     if (updates.accountType !== undefined) {
       // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroups = await accountGroupService.getAccountGroup(accountId)
+        const oldGroups = await accountGroupService.getAccountGroups(accountId)
         for (const oldGroup of oldGroups) {
           await accountGroupService.removeAccountFromGroup(accountId, oldGroup.id)
         }
       }
-      // 如果新类型是分组，添加到新分组
-      if (updates.accountType === 'group' && updates.groupId) {
-        // Claude Console 账户在分组中被视为 'claude' 平台
-        await accountGroupService.addAccountToGroup(accountId, updates.groupId, 'claude')
+      // 如果新类型是分组，处理多分组支持
+      if (updates.accountType === 'group') {
+        if (Object.prototype.hasOwnProperty.call(updates, 'groupIds')) {
+          // 如果明确提供了 groupIds 参数（包括空数组）
+          if (updates.groupIds && updates.groupIds.length > 0) {
+            // 设置新的多分组
+            await accountGroupService.setAccountGroups(accountId, updates.groupIds, 'claude')
+          } else {
+            // groupIds 为空数组，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(accountId)
+          }
+        } else if (updates.groupId) {
+          // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+          await accountGroupService.addAccountToGroup(accountId, updates.groupId, 'claude')
+        }
       }
     }
 
@@ -2231,15 +2531,18 @@ router.get('/bedrock-accounts', authenticateAdmin, async (req, res) => {
     if (groupId && groupId !== 'all') {
       if (groupId === 'ungrouped') {
         // 筛选未分组账户
-        accounts = accounts.filter(
-          (account) => !account.groupInfos || account.groupInfos.length === 0
-        )
+        const filteredAccounts = []
+        for (const account of accounts) {
+          const groups = await accountGroupService.getAccountGroups(account.id)
+          if (!groups || groups.length === 0) {
+            filteredAccounts.push(account)
+          }
+        }
+        accounts = filteredAccounts
       } else {
         // 筛选特定分组的账户
-        accounts = accounts.filter(
-          (account) =>
-            account.groupInfos && account.groupInfos.some((group) => group.id === groupId)
-        )
+        const groupMembers = await accountGroupService.getGroupMembers(groupId)
+        accounts = accounts.filter((account) => groupMembers.includes(account.id))
       }
     }
 
@@ -2248,7 +2551,7 @@ router.get('/bedrock-accounts', authenticateAdmin, async (req, res) => {
       accounts.map(async (account) => {
         try {
           const usageStats = await redis.getAccountUsageStats(account.id)
-          const groupInfos = await accountGroupService.getAccountGroup(account.id)
+          const groupInfos = await accountGroupService.getAccountGroups(account.id)
 
           return {
             ...account,
@@ -2265,7 +2568,7 @@ router.get('/bedrock-accounts', authenticateAdmin, async (req, res) => {
             statsError.message
           )
           try {
-            const groupInfos = await accountGroupService.getAccountGroup(account.id)
+            const groupInfos = await accountGroupService.getAccountGroups(account.id)
             return {
               ...account,
               groupInfos,
@@ -2678,15 +2981,18 @@ router.get('/gemini-accounts', authenticateAdmin, async (req, res) => {
     if (groupId && groupId !== 'all') {
       if (groupId === 'ungrouped') {
         // 筛选未分组账户
-        accounts = accounts.filter(
-          (account) => !account.groupInfos || account.groupInfos.length === 0
-        )
+        const filteredAccounts = []
+        for (const account of accounts) {
+          const groups = await accountGroupService.getAccountGroups(account.id)
+          if (!groups || groups.length === 0) {
+            filteredAccounts.push(account)
+          }
+        }
+        accounts = filteredAccounts
       } else {
         // 筛选特定分组的账户
-        accounts = accounts.filter(
-          (account) =>
-            account.groupInfos && account.groupInfos.some((group) => group.id === groupId)
-        )
+        const groupMembers = await accountGroupService.getGroupMembers(groupId)
+        accounts = accounts.filter((account) => groupMembers.includes(account.id))
       }
     }
 
@@ -2695,7 +3001,7 @@ router.get('/gemini-accounts', authenticateAdmin, async (req, res) => {
       accounts.map(async (account) => {
         try {
           const usageStats = await redis.getAccountUsageStats(account.id)
-          const groupInfos = await accountGroupService.getAccountGroup(account.id)
+          const groupInfos = await accountGroupService.getAccountGroups(account.id)
 
           return {
             ...account,
@@ -2713,7 +3019,7 @@ router.get('/gemini-accounts', authenticateAdmin, async (req, res) => {
           )
           // 如果获取统计失败，返回空统计
           try {
-            const groupInfos = await accountGroupService.getAccountGroup(account.id)
+            const groupInfos = await accountGroupService.getAccountGroups(account.id)
             return {
               ...account,
               groupInfos,
@@ -2817,14 +3123,26 @@ router.put('/gemini-accounts/:accountId', authenticateAdmin, async (req, res) =>
     if (updates.accountType !== undefined) {
       // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroups = await accountGroupService.getAccountGroup(accountId)
+        const oldGroups = await accountGroupService.getAccountGroups(accountId)
         for (const oldGroup of oldGroups) {
           await accountGroupService.removeAccountFromGroup(accountId, oldGroup.id)
         }
       }
-      // 如果新类型是分组，添加到新分组
-      if (updates.accountType === 'group' && updates.groupId) {
-        await accountGroupService.addAccountToGroup(accountId, updates.groupId, 'gemini')
+      // 如果新类型是分组，处理多分组支持
+      if (updates.accountType === 'group') {
+        if (Object.prototype.hasOwnProperty.call(updates, 'groupIds')) {
+          // 如果明确提供了 groupIds 参数（包括空数组）
+          if (updates.groupIds && updates.groupIds.length > 0) {
+            // 设置新的多分组
+            await accountGroupService.setAccountGroups(accountId, updates.groupIds, 'gemini')
+          } else {
+            // groupIds 为空数组，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(accountId)
+          }
+        } else if (updates.groupId) {
+          // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+          await accountGroupService.addAccountToGroup(accountId, updates.groupId, 'gemini')
+        }
       }
     }
 
@@ -5189,15 +5507,18 @@ router.get('/openai-accounts', authenticateAdmin, async (req, res) => {
     if (groupId && groupId !== 'all') {
       if (groupId === 'ungrouped') {
         // 筛选未分组账户
-        accounts = accounts.filter(
-          (account) => !account.groupInfos || account.groupInfos.length === 0
-        )
+        const filteredAccounts = []
+        for (const account of accounts) {
+          const groups = await accountGroupService.getAccountGroups(account.id)
+          if (!groups || groups.length === 0) {
+            filteredAccounts.push(account)
+          }
+        }
+        accounts = filteredAccounts
       } else {
         // 筛选特定分组的账户
-        accounts = accounts.filter(
-          (account) =>
-            account.groupInfos && account.groupInfos.some((group) => group.id === groupId)
-        )
+        const groupMembers = await accountGroupService.getGroupMembers(groupId)
+        accounts = accounts.filter((account) => groupMembers.includes(account.id))
       }
     }
 
@@ -5518,10 +5839,81 @@ router.put(
 // 获取所有 Azure OpenAI 账户
 router.get('/azure-openai-accounts', authenticateAdmin, async (req, res) => {
   try {
-    const accounts = await azureOpenaiAccountService.getAllAccounts()
+    const { platform, groupId } = req.query
+    let accounts = await azureOpenaiAccountService.getAllAccounts()
+
+    // 根据查询参数进行筛选
+    if (platform && platform !== 'all' && platform !== 'azure_openai') {
+      // 如果指定了其他平台，返回空数组
+      accounts = []
+    }
+
+    // 如果指定了分组筛选
+    if (groupId && groupId !== 'all') {
+      if (groupId === 'ungrouped') {
+        // 筛选未分组账户
+        const filteredAccounts = []
+        for (const account of accounts) {
+          const groups = await accountGroupService.getAccountGroups(account.id)
+          if (!groups || groups.length === 0) {
+            filteredAccounts.push(account)
+          }
+        }
+        accounts = filteredAccounts
+      } else {
+        // 筛选特定分组的账户
+        const groupMembers = await accountGroupService.getGroupMembers(groupId)
+        accounts = accounts.filter((account) => groupMembers.includes(account.id))
+      }
+    }
+
+    // 为每个账户添加使用统计信息和分组信息
+    const accountsWithStats = await Promise.all(
+      accounts.map(async (account) => {
+        try {
+          const usageStats = await redis.getAccountUsageStats(account.id)
+          const groupInfos = await accountGroupService.getAccountGroups(account.id)
+          return {
+            ...account,
+            groupInfos,
+            usage: {
+              daily: usageStats.daily,
+              total: usageStats.total,
+              averages: usageStats.averages
+            }
+          }
+        } catch (error) {
+          logger.debug(`Failed to get usage stats for Azure OpenAI account ${account.id}:`, error)
+          try {
+            const groupInfos = await accountGroupService.getAccountGroups(account.id)
+            return {
+              ...account,
+              groupInfos,
+              usage: {
+                daily: { requests: 0, tokens: 0, allTokens: 0 },
+                total: { requests: 0, tokens: 0, allTokens: 0 },
+                averages: { rpm: 0, tpm: 0 }
+              }
+            }
+          } catch (groupError) {
+            logger.debug(`Failed to get group info for account ${account.id}:`, groupError)
+            return {
+              ...account,
+              groupInfos: [],
+              usage: {
+                daily: { requests: 0, tokens: 0, allTokens: 0 },
+                total: { requests: 0, tokens: 0, allTokens: 0 },
+                averages: { rpm: 0, tpm: 0 }
+              }
+            }
+          }
+        }
+      })
+    )
+
     res.json({
       success: true,
-      data: accounts
+      data: accountsWithStats
     })
   } catch (error) {
     logger.error('Failed to fetch Azure OpenAI accounts:', error)
@@ -5547,6 +5939,7 @@ router.post('/azure-openai-accounts', authenticateAdmin, async (req, res) => {
       supportedModels,
       proxy,
       groupId,
+      groupIds,
       priority,
       isActive,
       schedulable
@@ -5625,6 +6018,17 @@ router.post('/azure-openai-accounts', authenticateAdmin, async (req, res) => {
       isActive: isActive !== false,
       schedulable: schedulable !== false
     })
+
+    // 如果是分组类型，将账户添加到分组
+    if (accountType === 'group') {
+      if (groupIds && groupIds.length > 0) {
+        // 使用多分组设置
+        await accountGroupService.setAccountGroups(account.id, groupIds, 'azure_openai')
+      } else if (groupId) {
+        // 兼容单分组模式
+        await accountGroupService.addAccountToGroup(account.id, groupId, 'azure_openai')
+      }
+    }
 
     res.json({
       success: true,
@@ -5812,6 +6216,56 @@ router.post('/migrate-api-keys-azure', authenticateAdmin, async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Failed to migrate API keys',
+      error: error.message
+    })
+  }
+})
+
+// 📋 获取统一Claude Code User-Agent信息
+router.get('/claude-code-version', authenticateAdmin, async (req, res) => {
+  try {
+    const CACHE_KEY = 'claude_code_user_agent:daily'
+
+    // 获取缓存的统一User-Agent
+    const unifiedUserAgent = await redis.client.get(CACHE_KEY)
+    const ttl = unifiedUserAgent ? await redis.client.ttl(CACHE_KEY) : 0
+
+    res.json({
+      success: true,
+      userAgent: unifiedUserAgent,
+      isActive: !!unifiedUserAgent,
+      ttlSeconds: ttl,
+      lastUpdated: unifiedUserAgent ? new Date().toISOString() : null
+    })
+  } catch (error) {
+    logger.error('❌ Get unified Claude Code User-Agent error:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Failed to get User-Agent information',
+      error: error.message
+    })
+  }
+})
+
+// 🗑️ 清除统一Claude Code User-Agent缓存
+router.post('/claude-code-version/clear', authenticateAdmin, async (req, res) => {
+  try {
+    const CACHE_KEY = 'claude_code_user_agent:daily'
+
+    // 删除缓存的统一User-Agent
+    await redis.client.del(CACHE_KEY)
+
+    logger.info(`🗑️ Admin manually cleared unified Claude Code User-Agent cache`)
+
+    res.json({
+      success: true,
+      message: 'Unified User-Agent cache cleared successfully'
+    })
+  } catch (error) {
+    logger.error('❌ Clear unified User-Agent cache error:', error)
+    res.status(500).json({
+      success: false,
+      message: 'Failed to clear cache',
       error: error.message
     })
   }

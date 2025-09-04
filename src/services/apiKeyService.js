@@ -368,7 +368,10 @@ class ApiKeyService {
         'allowedClients',
         'dailyCostLimit',
         'weeklyOpusCostLimit',
-        'tags'
+        'tags',
+        'userId', // 新增：用户ID（所有者变更）
+        'userUsername', // 新增：用户名（所有者变更）
+        'createdBy' // 新增：创建者（所有者变更）
       ]
       const updatedData = { ...keyData }
 
@@ -430,6 +433,139 @@ class ApiKeyService {
       return { success: true }
     } catch (error) {
       logger.error('❌ Failed to delete API key:', error)
+      throw error
+    }
+  }
+
+  // 🔄 恢复已删除的API Key
+  async restoreApiKey(keyId, restoredBy = 'system', restoredByType = 'system') {
+    try {
+      const keyData = await redis.getApiKey(keyId)
+      if (!keyData || Object.keys(keyData).length === 0) {
+        throw new Error('API key not found')
+      }
+
+      // 检查是否确实是已删除的key
+      if (keyData.isDeleted !== 'true') {
+        throw new Error('API key is not deleted')
+      }
+
+      // 准备更新的数据
+      const updatedData = { ...keyData }
+      updatedData.isActive = 'true'
+      updatedData.restoredAt = new Date().toISOString()
+      updatedData.restoredBy = restoredBy
+      updatedData.restoredByType = restoredByType
+
+      // 从更新的数据中移除删除相关的字段
+      delete updatedData.isDeleted
+      delete updatedData.deletedAt
+      delete updatedData.deletedBy
+      delete updatedData.deletedByType
+
+      // 保存更新后的数据
+      await redis.setApiKey(keyId, updatedData)
+
+      // 使用Redis的hdel命令删除不需要的字段
+      const keyName = `apikey:${keyId}`
+      await redis.client.hdel(keyName, 'isDeleted', 'deletedAt', 'deletedBy', 'deletedByType')
+
+      // 重新建立哈希映射（恢复API Key的使用能力）
+      if (keyData.apiKey) {
+        await redis.setApiKeyHash(keyData.apiKey, {
+          id: keyId,
+          name: keyData.name,
+          isActive: 'true'
+        })
+      }
+
+      logger.success(`✅ Restored API key: ${keyId} by ${restoredBy} (${restoredByType})`)
+
+      return { success: true, apiKey: updatedData }
+    } catch (error) {
+      logger.error('❌ Failed to restore API key:', error)
+      throw error
+    }
+  }
+
+  // 🗑️ 彻底删除API Key（物理删除）
+  async permanentDeleteApiKey(keyId) {
+    try {
+      const keyData = await redis.getApiKey(keyId)
+      if (!keyData || Object.keys(keyData).length === 0) {
+        throw new Error('API key not found')
+      }
+
+      // 确保只能彻底删除已经软删除的key
+      if (keyData.isDeleted !== 'true') {
+        throw new Error('只能彻底删除已经删除的API Key')
+      }
+
+      // 删除所有相关的使用统计数据
+      const today = new Date().toISOString().split('T')[0]
+      const yesterday = new Date(Date.now() - 86400000).toISOString().split('T')[0]
+
+      // 删除每日统计
+      await redis.client.del(`usage:daily:${today}:${keyId}`)
+      await redis.client.del(`usage:daily:${yesterday}:${keyId}`)
+
+      // 删除月度统计
+      const currentMonth = today.substring(0, 7)
+      await redis.client.del(`usage:monthly:${currentMonth}:${keyId}`)
+
+      // 删除所有相关的统计键（通过模式匹配）
+      const usageKeys = await redis.client.keys(`usage:*:${keyId}*`)
+      if (usageKeys.length > 0) {
+        await redis.client.del(...usageKeys)
+      }
+
+      // 删除API Key本身
+      await redis.deleteApiKey(keyId)
+
+      logger.success(`🗑️ Permanently deleted API key: ${keyId}`)
+
+      return { success: true }
+    } catch (error) {
+      logger.error('❌ Failed to permanently delete API key:', error)
+      throw error
+    }
+  }
+
+  // 🧹 清空所有已删除的API Keys
+  async clearAllDeletedApiKeys() {
+    try {
+      const allKeys = await this.getAllApiKeys(true)
+      const deletedKeys = allKeys.filter((key) => key.isDeleted === 'true')
+
+      let successCount = 0
+      let failedCount = 0
+      const errors = []
+
+      for (const key of deletedKeys) {
+        try {
+          await this.permanentDeleteApiKey(key.id)
+          successCount++
+        } catch (error) {
+          failedCount++
+          errors.push({
+            keyId: key.id,
+            keyName: key.name,
+            error: error.message
+          })
+        }
+      }
+
+      logger.success(`🧹 Cleared deleted API keys: ${successCount} success, ${failedCount} failed`)
+
+      return {
+        success: true,
+        total: deletedKeys.length,
+        successCount,
+        failedCount,
+        errors
+      }
+    } catch (error) {
+      logger.error('❌ Failed to clear all deleted API keys:', error)
       throw error
     }
   }

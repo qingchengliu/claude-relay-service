@@ -474,6 +474,20 @@
                 <div class="whitespace-nowrap text-gray-300">echo $env:OPENAI_API_KEY</div>
               </div>
             </div>
+
+            <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 sm:p-4">
+              <h6 class="mb-2 font-medium text-yellow-800">Codex 额外配置</h6>
+              <p class="mb-3 text-sm text-yellow-700">
+                需要在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
+                文件中添加以下配置来禁用响应存储：
+              </p>
+              <div
+                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+              >
+                <div class="whitespace-nowrap text-gray-300">disable_response_storage = true</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -985,6 +999,20 @@
                 <div class="whitespace-nowrap text-gray-300">echo $OPENAI_API_KEY</div>
               </div>
             </div>
+
+            <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 sm:p-4">
+              <h6 class="mb-2 font-medium text-yellow-800">Codex 额外配置</h6>
+              <p class="mb-3 text-sm text-yellow-700">
+                需要在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
+                文件中添加以下配置来禁用响应存储：
+              </p>
+              <div
+                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+              >
+                <div class="whitespace-nowrap text-gray-300">disable_response_storage = true</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1487,6 +1515,20 @@
                 <div class="whitespace-nowrap text-gray-300">echo $OPENAI_API_KEY</div>
               </div>
             </div>
+
+            <div class="rounded-lg border border-yellow-200 bg-yellow-50 p-3 sm:p-4">
+              <h6 class="mb-2 font-medium text-yellow-800">Codex 额外配置</h6>
+              <p class="mb-3 text-sm text-yellow-700">
+                需要在
+                <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
+                文件中添加以下配置来禁用响应存储：
+              </p>
+              <div
+                class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+              >
+                <div class="whitespace-nowrap text-gray-300">disable_response_storage = true</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -1639,7 +1681,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { computed, ref } from 'vue'
 
 // 当前系统选择
 const activeTutorialSystem = ref('windows')
@@ -1653,6 +1695,14 @@ const tutorialSystems = [
 
 // 获取基础URL前缀
 const getBaseUrlPrefix = () => {
+  // 优先使用环境变量配置的自定义前缀
+  const customPrefix = import.meta.env.VITE_API_BASE_PREFIX
+  if (customPrefix) {
+    // 去除末尾的斜杠
+    return customPrefix.replace(/\/$/, '')
+  }
+
+  // 否则使用当前浏览器访问地址
   // 更健壮的获取 origin 的方法，兼容旧版浏览器和特殊环境
   let origin = ''
 

@@ -244,19 +244,47 @@
                 >选择分组 *</label
               >
               <div class="flex gap-2">
-                <select
-                  v-model="form.groupId"
-                  class="form-input flex-1 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-                  required
-                >
-                  <option value="">请选择分组</option>
-                  <option v-for="group in filteredGroups" :key="group.id" :value="group.id">
-                    {{ group.name }} ({{ group.memberCount || 0 }} 个成员)
-                  </option>
-                  <option value="__new__">+ 新建分组</option>
-                </select>
+                <div class="flex-1">
+                  <!-- 多选分组界面 -->
+                  <div
+                    class="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3 dark:border-gray-600 dark:bg-gray-700"
+                  >
+                    <div
+                      v-if="filteredGroups.length === 0"
+                      class="text-sm text-gray-500 dark:text-gray-400"
+                    >
+                      暂无可用分组
+                    </div>
+                    <label
+                      v-for="group in filteredGroups"
+                      :key="group.id"
+                      class="flex cursor-pointer items-center gap-2 rounded-md p-2 hover:bg-gray-50 dark:hover:bg-gray-600"
+                    >
+                      <input
+                        v-model="form.groupIds"
+                        class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                        type="checkbox"
+                        :value="group.id"
+                      />
+                      <span class="text-sm text-gray-700 dark:text-gray-200">
+                        {{ group.name }} ({{ group.memberCount || 0 }} 个成员)
+                      </span>
+                    </label>
+                    <!-- 新建分组选项 -->
+                    <div class="border-t pt-2 dark:border-gray-600">
+                      <button
+                        class="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                        type="button"
+                        @click="handleNewGroup"
+                      >
+                        <i class="fas fa-plus" />
+                        新建分组
+                      </button>
+                    </div>
+                  </div>
+                </div>
                 <button
-                  class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2"
+                  class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                   type="button"
                   @click="refreshGroups"
                 >
@@ -826,6 +854,51 @@
               </label>
             </div>
 
+            <!-- Claude User-Agent 版本配置 -->
+            <div v-if="form.platform === 'claude'" class="mt-4">
+              <label class="flex items-start">
+                <input
+                  v-model="form.useUnifiedUserAgent"
+                  class="mt-1 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                  type="checkbox"
+                />
+                <div class="ml-3">
+                  <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                    使用统一 Claude Code 版本
+                  </span>
+                  <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    开启后将使用从真实 Claude Code 客户端捕获的统一 User-Agent，提高兼容性
+                  </p>
+                  <div v-if="unifiedUserAgent" class="mt-1">
+                    <div class="flex items-center justify-between">
+                      <p class="text-xs text-green-600 dark:text-green-400">
+                        💡 当前统一版本：{{ unifiedUserAgent }}
+                      </p>
+                      <button
+                        class="ml-2 text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                        :disabled="clearingCache"
+                        type="button"
+                        @click="clearUnifiedCache"
+                      >
+                        <i v-if="!clearingCache" class="fas fa-trash-alt mr-1"></i>
+                        <div v-else class="loading-spinner mr-1"></div>
+                        {{ clearingCache ? '清除中...' : '清除缓存' }}
+                      </button>
+                    </div>
+                  </div>
+                  <div v-else class="mt-1">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
+                      ⏳ 等待从 Claude Code 客户端捕获 User-Agent
+                    </p>
+                    <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                      💡 提示：如果长时间未能捕获，请确认有 Claude Code 客户端正在使用此账户，
+                      或联系开发者检查 User-Agent 格式是否发生变化
+                    </p>
+                  </div>
+                </div>
+              </label>
+            </div>
+
             <!-- 所有平台的优先级设置 -->
             <div>
               <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
@@ -1269,19 +1342,47 @@
               >选择分组 *</label
             >
             <div class="flex gap-2">
-              <select
-                v-model="form.groupId"
-                class="form-input flex-1 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-                required
-              >
-                <option value="">请选择分组</option>
-                <option v-for="group in filteredGroups" :key="group.id" :value="group.id">
-                  {{ group.name }} ({{ group.memberCount || 0 }} 个成员)
-                </option>
-                <option value="__new__">+ 新建分组</option>
-              </select>
+              <div class="flex-1">
+                <!-- 多选分组界面 -->
+                <div
+                  class="max-h-48 space-y-2 overflow-y-auto rounded-md border p-3 dark:border-gray-600 dark:bg-gray-700"
+                >
+                  <div
+                    v-if="filteredGroups.length === 0"
+                    class="text-sm text-gray-500 dark:text-gray-400"
+                  >
+                    暂无可用分组
+                  </div>
+                  <label
+                    v-for="group in filteredGroups"
+                    :key="group.id"
+                    class="flex cursor-pointer items-center gap-2 rounded-md p-2 hover:bg-gray-50 dark:hover:bg-gray-600"
+                  >
+                    <input
+                      v-model="form.groupIds"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                      type="checkbox"
+                      :value="group.id"
+                    />
+                    <span class="text-sm text-gray-700 dark:text-gray-200">
+                      {{ group.name }} ({{ group.memberCount || 0 }} 个成员)
+                    </span>
+                  </label>
+                  <!-- 新建分组选项 -->
+                  <div class="border-t pt-2 dark:border-gray-600">
+                    <button
+                      class="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                      type="button"
+                      @click="handleNewGroup"
+                    >
+                      <i class="fas fa-plus" />
+                      新建分组
+                    </button>
+                  </div>
+                </div>
+              </div>
               <button
-                class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                class="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
                 type="button"
                 @click="refreshGroups"
               >
@@ -1352,6 +1453,51 @@
                 <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
                   当系统检测到账户接近5小时使用限制时，自动暂停调度该账户。进入新的时间窗口后会自动恢复调度。
                 </p>
+              </div>
+            </label>
+          </div>
+
+          <!-- Claude User-Agent 版本配置（编辑模式） -->
+          <div v-if="form.platform === 'claude'" class="mt-4">
+            <label class="flex items-start">
+              <input
+                v-model="form.useUnifiedUserAgent"
+                class="mt-1 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                type="checkbox"
+              />
+              <div class="ml-3">
+                <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
+                  使用统一 Claude Code 版本
+                </span>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  开启后将使用从真实 Claude Code 客户端捕获的统一 User-Agent，提高兼容性
+                </p>
+                <div v-if="unifiedUserAgent" class="mt-1">
+                  <div class="flex items-center justify-between">
+                    <p class="text-xs text-green-600 dark:text-green-400">
+                      💡 当前统一版本：{{ unifiedUserAgent }}
+                    </p>
+                    <button
+                      class="ml-2 text-xs text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                      :disabled="clearingCache"
+                      type="button"
+                      @click="clearUnifiedCache"
+                    >
+                      <i v-if="!clearingCache" class="fas fa-trash-alt mr-1"></i>
+                      <div v-else class="loading-spinner mr-1"></div>
+                      {{ clearingCache ? '清除中...' : '清除缓存' }}
+                    </button>
+                  </div>
+                </div>
+                <div v-else class="mt-1">
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    ⏳ 等待从 Claude Code 客户端捕获 User-Agent
+                  </p>
+                  <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                    💡 提示：如果长时间未能捕获，请确认有 Claude Code 客户端正在使用此账户，
+                    或联系开发者检查 User-Agent 格式是否发生变化
+                  </p>
+                </div>
               </div>
             </label>
           </div>
@@ -1848,7 +1994,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, onMounted } from 'vue'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import { useAccountsStore } from '@/stores/accounts'
@@ -1886,6 +2032,10 @@ const setupTokenAuthCode = ref('')
 const setupTokenCopied = ref(false)
 const setupTokenSessionId = ref('')
 
+// Claude Code 统一 User-Agent 信息
+const unifiedUserAgent = ref('')
+const clearingCache = ref(false)
+
 // 初始化代理配置
 const initProxyConfig = () => {
   if (props.account?.proxy && props.account.proxy.host && props.account.proxy.port) {
@@ -1922,7 +2072,9 @@ const form = ref({
   accountType: props.account?.accountType || 'shared',
   subscriptionType: 'claude_max', // 默认为 Claude Max，兼容旧数据
   autoStopOnWarning: props.account?.autoStopOnWarning || false, // 5小时限制自动停止调度
+  useUnifiedUserAgent: props.account?.useUnifiedUserAgent || false, // 使用统一Claude Code版本
   groupId: '',
+  groupIds: [],
   projectId: props.account?.projectId || '',
   idToken: '',
   accessToken: '',
@@ -2030,13 +2182,22 @@ const nextStep = async () => {
     return
   }
 
-  // 分组类型验证
+  // 分组类型验证 - OAuth流程修复
   if (
     form.value.accountType === 'group' &&
-    (!form.value.groupId || form.value.groupId.trim() === '')
+    (!form.value.groupIds || form.value.groupIds.length === 0)
   ) {
     showToast('请选择一个分组', 'error')
     return
+  }
+
+  // 数据同步：确保 groupId 和 groupIds 保持一致 - OAuth流程
+  if (form.value.accountType === 'group') {
+    if (form.value.groupIds && form.value.groupIds.length > 0) {
+      form.value.groupId = form.value.groupIds[0]
+    } else {
+      form.value.groupId = ''
+    }
   }
 
   // 对于Gemini账户，检查项目 ID
@@ -2172,6 +2333,7 @@ const handleOAuthSuccess = async (tokenInfo) => {
       description: form.value.description,
       accountType: form.value.accountType,
       groupId: form.value.accountType === 'group' ? form.value.groupId : undefined,
+      groupIds: form.value.accountType === 'group' ? form.value.groupIds : undefined,
       proxy: form.value.proxy.enabled
         ? {
             type: form.value.proxy.type,
@@ -2188,6 +2350,7 @@ const handleOAuthSuccess = async (tokenInfo) => {
       data.claudeAiOauth = tokenInfo.claudeAiOauth || tokenInfo
       data.priority = form.value.priority || 50
       data.autoStopOnWarning = form.value.autoStopOnWarning || false
+      data.useUnifiedUserAgent = form.value.useUnifiedUserAgent || false
       // 添加订阅类型信息
       data.subscriptionInfo = {
         accountType: form.value.subscriptionType || 'claude_max',
@@ -2295,13 +2458,22 @@ const createAccount = async () => {
     }
   }
 
-  // 分组类型验证
+  // 分组类型验证 - 创建账户流程修复
   if (
     form.value.accountType === 'group' &&
-    (!form.value.groupId || form.value.groupId.trim() === '')
+    (!form.value.groupIds || form.value.groupIds.length === 0)
   ) {
     showToast('请选择一个分组', 'error')
     hasError = true
+  }
+
+  // 数据同步：确保 groupId 和 groupIds 保持一致 - 创建流程
+  if (form.value.accountType === 'group') {
+    if (form.value.groupIds && form.value.groupIds.length > 0) {
+      form.value.groupId = form.value.groupIds[0]
+    } else {
+      form.value.groupId = ''
+    }
   }
 
   if (hasError) {
@@ -2315,6 +2487,7 @@ const createAccount = async () => {
       description: form.value.description,
       accountType: form.value.accountType,
       groupId: form.value.accountType === 'group' ? form.value.groupId : undefined,
+      groupIds: form.value.accountType === 'group' ? form.value.groupIds : undefined,
       proxy: form.value.proxy.enabled
         ? {
             type: form.value.proxy.type,
@@ -2340,6 +2513,7 @@ const createAccount = async () => {
       }
       data.priority = form.value.priority || 50
       data.autoStopOnWarning = form.value.autoStopOnWarning || false
+      data.useUnifiedUserAgent = form.value.useUnifiedUserAgent || false
       // 添加订阅类型信息
       data.subscriptionInfo = {
         accountType: form.value.subscriptionType || 'claude_max',
@@ -2450,6 +2624,8 @@ const createAccount = async () => {
         ? form.value.supportedModels
         : []
       data.priority = form.value.priority || 50
+      data.isActive = form.value.isActive !== false
+      data.schedulable = form.value.schedulable !== false
     }
 
     let result
@@ -2463,8 +2639,10 @@ const createAccount = async () => {
       result = await accountsStore.createOpenAIAccount(data)
     } else if (form.value.platform === 'azure_openai') {
       result = await accountsStore.createAzureOpenAIAccount(data)
-    } else {
+    } else if (form.value.platform === 'gemini') {
       result = await accountsStore.createGeminiAccount(data)
+    } else {
+      throw new Error(`不支持的平台: ${form.value.platform}`)
     }
 
     emit('success', result)
@@ -2486,13 +2664,22 @@ const updateAccount = async () => {
     return
   }
 
-  // 分组类型验证
+  // 分组类型验证 - 更新账户流程修复
   if (
     form.value.accountType === 'group' &&
-    (!form.value.groupId || form.value.groupId.trim() === '')
+    (!form.value.groupIds || form.value.groupIds.length === 0)
   ) {
     showToast('请选择一个分组', 'error')
     return
+  }
+
+  // 数据同步：确保 groupId 和 groupIds 保持一致 - 更新流程
+  if (form.value.accountType === 'group') {
+    if (form.value.groupIds && form.value.groupIds.length > 0) {
+      form.value.groupId = form.value.groupIds[0]
+    } else {
+      form.value.groupId = ''
+    }
   }
 
   // 对于Gemini账户，检查项目 ID
@@ -2518,6 +2705,7 @@ const updateAccount = async () => {
       description: form.value.description,
       accountType: form.value.accountType,
       groupId: form.value.accountType === 'group' ? form.value.groupId : undefined,
+      groupIds: form.value.accountType === 'group' ? form.value.groupIds : undefined,
       proxy: form.value.proxy.enabled
         ? {
             type: form.value.proxy.type,
@@ -2579,6 +2767,7 @@ const updateAccount = async () => {
     if (props.account.platform === 'claude') {
       data.priority = form.value.priority || 50
       data.autoStopOnWarning = form.value.autoStopOnWarning || false
+      data.useUnifiedUserAgent = form.value.useUnifiedUserAgent || false
       // 更新订阅类型信息
       data.subscriptionInfo = {
         accountType: form.value.subscriptionType || 'claude_max',
@@ -2662,8 +2851,10 @@ const updateAccount = async () => {
       await accountsStore.updateOpenAIAccount(props.account.id, data)
     } else if (props.account.platform === 'azure_openai') {
       await accountsStore.updateAzureOpenAIAccount(props.account.id, data)
-    } else {
+    } else if (props.account.platform === 'gemini') {
       await accountsStore.updateGeminiAccount(props.account.id, data)
+    } else {
+      throw new Error(`不支持的平台: ${props.account.platform}`)
     }
 
     emit('success')
@@ -2765,6 +2956,11 @@ const refreshGroups = async () => {
   showToast('分组列表已刷新', 'success')
 }
 
+// 处理新建分组
+const handleNewGroup = () => {
+  showGroupManagement.value = true
+}
+
 // 处理分组管理模态框刷新
 const handleGroupRefresh = async () => {
   await loadGroups()
@@ -2791,8 +2987,26 @@ watch(
     // 平台变化时，清空分组选择
     if (form.value.accountType === 'group') {
       form.value.groupId = ''
+      form.value.groupIds = []
     }
   }
+)
+
+// 监听分组选择变化，保持 groupId 和 groupIds 同步
+watch(
+  () => form.value.groupIds,
+  (newGroupIds) => {
+    if (form.value.accountType === 'group') {
+      if (newGroupIds && newGroupIds.length > 0) {
+        // 如果有选中的分组，使用第一个作为主分组
+        form.value.groupId = newGroupIds[0]
+      } else {
+        // 如果没有选中分组，清空主分组
+        form.value.groupId = ''
+      }
+    }
+  },
+  { deep: true }
 )
 
 // 监听Setup Token授权码输入，自动提取URL中的code参数
@@ -2955,7 +3169,9 @@ watch(
         accountType: newAccount.accountType || 'shared',
         subscriptionType: subscriptionType,
         autoStopOnWarning: newAccount.autoStopOnWarning || false,
+        useUnifiedUserAgent: newAccount.useUnifiedUserAgent || false,
         groupId: groupId,
+        groupIds: [],
         projectId: newAccount.projectId || '',
         accessToken: '',
         refreshToken: '',
@@ -2997,28 +3213,89 @@ watch(
       // 如果是分组类型，加载分组ID
       if (newAccount.accountType === 'group') {
         // 先加载分组列表
-        loadGroups().then(() => {
+        loadGroups().then(async () => {
+          const foundGroupIds = []
+
           // 如果账户有 groupInfo，直接使用它的 groupId
           if (newAccount.groupInfo && newAccount.groupInfo.id) {
             form.value.groupId = newAccount.groupInfo.id
+            foundGroupIds.push(newAccount.groupInfo.id)
           } else {
             // 否则查找账户所属的分组
-            groups.value.forEach((group) => {
-              apiClient
-                .get(`/admin/account-groups/${group.id}/members`)
-                .then((response) => {
-                  const members = response.data || []
-                  if (members.some((m) => m.id === newAccount.id)) {
-                    form.value.groupId = group.id
+            const checkPromises = groups.value.map(async (group) => {
+              try {
+                const response = await apiClient.get(`/admin/account-groups/${group.id}/members`)
+                const members = response.data || []
+                if (members.some((m) => m.id === newAccount.id)) {
+                  foundGroupIds.push(group.id)
+                  if (!form.value.groupId) {
+                    form.value.groupId = group.id // 设置第一个找到的分组作为主分组
                   }
-                })
-                .catch(() => {})
+                }
+              } catch (error) {
+                // 忽略错误
+              }
             })
+
+            await Promise.all(checkPromises)
           }
+
+          // 设置多选分组
+          form.value.groupIds = foundGroupIds
         })
       }
     }
   },
   { immediate: true }
+)
+
+// 获取统一 User-Agent 信息
+const fetchUnifiedUserAgent = async () => {
+  try {
+    const response = await apiClient.get('/admin/claude-code-version')
+    if (response.success && response.userAgent) {
+      unifiedUserAgent.value = response.userAgent
+    } else {
+      unifiedUserAgent.value = ''
+    }
+  } catch (error) {
+    console.warn('Failed to fetch unified User-Agent:', error)
+    unifiedUserAgent.value = ''
+  }
+}
+
+// 清除统一 User-Agent 缓存
+const clearUnifiedCache = async () => {
+  clearingCache.value = true
+  try {
+    const response = await apiClient.post('/admin/claude-code-version/clear')
+    if (response.success) {
+      unifiedUserAgent.value = ''
+      showToast('统一User-Agent缓存已清除', 'success')
+    } else {
+      showToast('清除缓存失败', 'error')
+    }
+  } catch (error) {
+    console.error('Failed to clear unified User-Agent cache:', error)
+    showToast('清除缓存失败：' + (error.message || '未知错误'), 'error')
+  } finally {
+    clearingCache.value = false
+  }
+}
+
+// 组件挂载时获取统一 User-Agent 信息
+onMounted(() => {
+  // 获取Claude Code统一User-Agent信息
+  fetchUnifiedUserAgent()
+})
+
+// 监听平台变化，当切换到Claude平台时获取统一User-Agent信息
+watch(
+  () => form.value.platform,
+  (newPlatform) => {
+    if (newPlatform === 'claude') {
+      fetchUnifiedUserAgent()
+    }
+  }
 )
 </script>
