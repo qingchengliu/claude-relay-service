@@ -1095,22 +1095,8 @@ class ClaudeRelayService {
                             collectedContent[contentIndex].inputJsonBuffer
                           )
                           collectedContent[contentIndex].input = completeInput
-                          logger.info(
-                            '📊 [Stream Capture] Successfully parsed complete input JSON',
-                            {
-                              inputKeys: Object.keys(completeInput),
-                              bufferLength: collectedContent[contentIndex].inputJsonBuffer.length
-                            }
-                          )
                         } catch (e) {
                           // JSON不完整，继续累积
-                          logger.debug(
-                            '📊 [Stream Capture] JSON incomplete, continuing to buffer',
-                            {
-                              error: e.message,
-                              bufferLength: collectedContent[contentIndex].inputJsonBuffer.length
-                            }
-                          )
                         }
                       }
                     }
@@ -1273,23 +1259,6 @@ class ClaudeRelayService {
                 input: item.input
               }))
             }
-
-            logger.info('📊 [Claude Stream Capture] Final response for callback', {
-              responseContentLength: response.content.length,
-              responseContent: response.content.map((item) => ({
-                type: item.type,
-                name: item.name,
-                inputKeys: Object.keys(item.input || {}),
-                inputSample: Object.keys(item.input || {}).reduce((acc, key) => {
-                  acc[key] =
-                    typeof item.input[key] === 'string'
-                      ? item.input[key].substring(0, 100) +
-                        (item.input[key].length > 100 ? '...' : '')
-                      : item.input[key]
-                  return acc
-                }, {})
-              }))
-            })
 
             // 调用一次usageCallback记录合并后的数据
             usageCallback({ ...finalUsage, response })

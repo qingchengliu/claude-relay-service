@@ -501,16 +501,6 @@ class ClaudeConsoleRelayService {
 
                       // 捕获内容块开始
                       if (data.type === 'content_block_start' && data.content_block) {
-                        logger.info('📊 [Stream Capture] Content block start', {
-                          index: data.index,
-                          blockType: data.content_block.type,
-                          blockName: data.content_block.name,
-                          hasInput: !!data.content_block.input,
-                          inputKeys: data.content_block.input
-                            ? Object.keys(data.content_block.input)
-                            : []
-                        })
-
                         collectedContent.push({
                           index: data.index,
                           type: data.content_block.type,
@@ -524,16 +514,6 @@ class ClaudeConsoleRelayService {
                       // 捕获内容块增量
                       if (data.type === 'content_block_delta' && data.delta) {
                         const contentIndex = data.index
-                        logger.info('📊 [Stream Capture] Content block delta', {
-                          index: contentIndex,
-                          deltaType: data.delta.type,
-                          hasText: !!data.delta.text,
-                          hasPartialJson: !!data.delta.partial_json,
-                          textLength: data.delta.text ? data.delta.text.length : 0,
-                          partialJsonLength: data.delta.partial_json
-                            ? data.delta.partial_json.length
-                            : 0
-                        })
 
                         if (collectedContent[contentIndex]) {
                           if (data.delta.type === 'text_delta' && data.delta.text) {
@@ -542,9 +522,6 @@ class ClaudeConsoleRelayService {
                             data.delta.type === 'input_json_delta' &&
                             data.delta.partial_json
                           ) {
-                            logger.info('📊 [Stream Capture] Processing input_json_delta', {
-                              partialJson: data.delta.partial_json
-                            })
                             // 累积拼接JSON字符串
                             if (!collectedContent[contentIndex].inputJsonBuffer) {
                               collectedContent[contentIndex].inputJsonBuffer = ''
@@ -558,34 +535,12 @@ class ClaudeConsoleRelayService {
                                 collectedContent[contentIndex].inputJsonBuffer
                               )
                               collectedContent[contentIndex].input = completeInput
-                              logger.info(
-                                '📊 [Stream Capture] Successfully parsed complete input JSON',
-                                {
-                                  inputKeys: Object.keys(completeInput),
-                                  bufferLength:
-                                    collectedContent[contentIndex].inputJsonBuffer.length
-                                }
-                              )
                             } catch (e) {
                               // JSON不完整，继续累积
-                              logger.debug(
-                                '📊 [Stream Capture] JSON incomplete, continuing to buffer',
-                                {
-                                  error: e.message,
-                                  bufferLength:
-                                    collectedContent[contentIndex].inputJsonBuffer.length,
-                                  bufferPreview: collectedContent[
-                                    contentIndex
-                                  ].inputJsonBuffer.substring(0, 100)
-                                }
-                              )
                             }
                           }
                         } else {
-                          logger.warn('📊 [Stream Capture] Content index not found', {
-                            requestedIndex: contentIndex,
-                            availableIndices: collectedContent.map((c, i) => i)
-                          })
+                          // Content index not found - skip
                         }
                       }
 
@@ -597,18 +552,6 @@ class ClaudeConsoleRelayService {
                         collectedUsageData.output_tokens = data.usage.output_tokens || 0
 
                         if (collectedUsageData.input_tokens !== undefined && !finalUsageReported) {
-                          logger.info('📊 [Stream Capture] Building response for callback', {
-                            collectedContentLength: collectedContent.length,
-                            collectedContentSummary: collectedContent.map((item) => ({
-                              index: item.index,
-                              type: item.type,
-                              name: item.name,
-                              hasInput: !!item.input,
-                              inputKeys: Object.keys(item.input || {}),
-                              textLength: item.text ? item.text.length : 0
-                            }))
-                          })
-
                           // 构建完整的响应对象传递给插件
                           const callbackResponse = {
                             content: collectedContent.map((item) => ({
@@ -617,23 +560,6 @@ class ClaudeConsoleRelayService {
                               input: item.input
                             }))
                           }
-
-                          logger.info('📊 [Stream Capture] Final response for callback', {
-                            responseContentLength: callbackResponse.content.length,
-                            responseContent: callbackResponse.content.map((item) => ({
-                              type: item.type,
-                              name: item.name,
-                              inputKeys: Object.keys(item.input || {}),
-                              inputSample: Object.keys(item.input || {}).reduce((acc, key) => {
-                                acc[key] =
-                                  typeof item.input[key] === 'string'
-                                    ? item.input[key].substring(0, 100) +
-                                      (item.input[key].length > 100 ? '...' : '')
-                                    : item.input[key]
-                                return acc
-                              }, {})
-                            }))
-                          })
 
                           usageCallback({
                             ...collectedUsageData,
