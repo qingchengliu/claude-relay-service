@@ -95,6 +95,12 @@ class CodeStatisticsRedis {
         const keyLangDailyKey = `${this.prefix}key:${keyId}:language:daily:${language}:${today}`
         pipeline.hincrby(keyLangDailyKey, 'lines', lines)
         pipeline.expire(keyLangDailyKey, 86400 * 90)
+
+        // 特殊处理 java-test 语言，累加到总计中
+        if (language === 'java-test') {
+          const keyStatsKey = `${this.prefix}key:${keyId}`
+          pipeline.hincrby(keyStatsKey, 'totalTestLines', lines)
+        }
       }
     }
 
@@ -279,11 +285,8 @@ class CodeStatisticsRedis {
           const totalRequests = parseInt(usageData.totalRequests || usageData.requests || 0)
           const totalCostValue = parseFloat(totalCost || 0)
 
-          // 获取java-test语言的总统计
-          const languageKey = `${this.prefix}key:${keyId}:languages`
-          const totalTestLines = parseInt(
-            (await this.redis.getClient().hget(languageKey, 'java-test')) || 0
-          )
+          // 直接从预处理的总计中获取 java-test 行数
+          const totalTestLines = parseInt(data.totalTestLines || 0)
 
           leaderboard.push({
             keyId,
@@ -373,7 +376,7 @@ class CodeStatisticsRedis {
           totalModifiedFiles += dayModifiedFiles
 
           // 获取当天java-test语言的统计
-          const javaTestKey = `${this.prefix}language:daily:java-test:${dateString}:${keyId}`
+          const javaTestKey = `${this.prefix}key:${keyId}:language:daily:java-test:${dateString}`
           const dayTestLines = parseInt(
             (await this.redis.getClient().hget(javaTestKey, 'lines')) || 0
           )
@@ -492,7 +495,7 @@ class CodeStatisticsRedis {
           totalModifiedFiles += dayModifiedFiles
 
           // 获取当天java-test语言的统计
-          const javaTestKey = `${this.prefix}language:daily:java-test:${dateString}:${keyId}`
+          const javaTestKey = `${this.prefix}key:${keyId}:language:daily:java-test:${dateString}`
           const dayTestLines = parseInt(
             (await this.redis.getClient().hget(javaTestKey, 'lines')) || 0
           )
