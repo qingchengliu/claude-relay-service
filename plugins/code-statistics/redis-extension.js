@@ -279,10 +279,17 @@ class CodeStatisticsRedis {
           const totalRequests = parseInt(usageData.totalRequests || usageData.requests || 0)
           const totalCostValue = parseFloat(totalCost || 0)
 
+          // 获取java-test语言的总统计
+          const languageKey = `${this.prefix}key:${keyId}:languages`
+          const totalTestLines = parseInt(
+            (await this.redis.getClient().hget(languageKey, 'java-test')) || 0
+          )
+
           leaderboard.push({
             keyId,
             userName,
             totalEditedLines: parseInt(data.totalEditedLines || 0),
+            totalTestLines, // 新增单测行数字段
             totalEditOperations: parseInt(data.totalEditOperations || 0),
             totalNewFiles: parseInt(data.totalNewFiles || 0),
             totalModifiedFiles: parseInt(data.totalModifiedFiles || 0),
@@ -339,6 +346,7 @@ class CodeStatisticsRedis {
         let totalOperations = 0
         let totalNewFiles = 0
         let totalModifiedFiles = 0
+        let totalTestLines = 0 // 新增单测行数统计
 
         // 累计指定天数的统计数据
         let totalRequests = 0
@@ -363,6 +371,13 @@ class CodeStatisticsRedis {
           totalOperations += dayOperations
           totalNewFiles += dayNewFiles
           totalModifiedFiles += dayModifiedFiles
+
+          // 获取当天java-test语言的统计
+          const javaTestKey = `${this.prefix}language:daily:java-test:${dateString}:${keyId}`
+          const dayTestLines = parseInt(
+            (await this.redis.getClient().hget(javaTestKey, 'lines')) || 0
+          )
+          totalTestLines += dayTestLines
 
           // 如果当天有任何编辑活动，则计为活跃天
           if (dayLines > 0 || dayOperations > 0 || dayNewFiles > 0 || dayModifiedFiles > 0) {
@@ -392,6 +407,7 @@ class CodeStatisticsRedis {
             keyId,
             userName,
             totalEditedLines: totalLines,
+            totalTestLines, // 新增单测行数字段
             totalEditOperations: totalOperations,
             totalNewFiles,
             totalModifiedFiles,
@@ -450,6 +466,7 @@ class CodeStatisticsRedis {
         let totalOperations = 0
         let totalNewFiles = 0
         let totalModifiedFiles = 0
+        let totalTestLines = 0 // 新增单测行数统计
 
         // 获取当月的所有日期
         let totalRequests = 0
@@ -473,6 +490,13 @@ class CodeStatisticsRedis {
           totalOperations += dayOperations
           totalNewFiles += dayNewFiles
           totalModifiedFiles += dayModifiedFiles
+
+          // 获取当天java-test语言的统计
+          const javaTestKey = `${this.prefix}language:daily:java-test:${dateString}:${keyId}`
+          const dayTestLines = parseInt(
+            (await this.redis.getClient().hget(javaTestKey, 'lines')) || 0
+          )
+          totalTestLines += dayTestLines
 
           // 如果当天有任何编辑活动，则计为活跃天
           if (dayLines > 0 || dayOperations > 0 || dayNewFiles > 0 || dayModifiedFiles > 0) {
@@ -502,6 +526,7 @@ class CodeStatisticsRedis {
             keyId,
             userName,
             totalEditedLines: totalLines,
+            totalTestLines, // 新增单测行数字段
             totalEditOperations: totalOperations,
             totalNewFiles,
             totalModifiedFiles,

@@ -278,7 +278,36 @@ function detectLanguage(filePath, content) {
     sql: 'sql'
   }
 
-  return languageMap[extension] || extension
+  const baseLanguage = languageMap[extension] || extension
+
+  // 特殊处理：Java测试文件识别
+  if (baseLanguage === 'java' && isJavaTestFile(filePath)) {
+    return 'java-test'
+  }
+
+  return baseLanguage
+}
+
+/**
+ * 判断是否为Java单元测试文件
+ * 识别规则：路径包含\src\test\java 且文件名包含Test
+ */
+function isJavaTestFile(filePath) {
+  if (!filePath) {
+    return false
+  }
+
+  // 标准化路径分隔符
+  const normalizedPath = filePath.replace(/\\/g, '/')
+
+  // 检查路径是否包含 src/test/java/ (支持相对路径和绝对路径)
+  const hasTestPath = normalizedPath.includes('src/test/java/')
+
+  // 检查文件名是否包含Test（大小写不敏感）
+  const fileName = normalizedPath.split('/').pop() || ''
+  const hasTestInName = /test/i.test(fileName)
+
+  return hasTestPath && hasTestInName
 }
 
 /**
@@ -807,7 +836,7 @@ function isCodeFileExtension(extension) {
 /**
  * 根据文件扩展名检测编程语言（只检测编程相关文件）
  */
-function detectLanguageFromExtension(extension) {
+function detectLanguageFromExtension(extension, filePath = null) {
   if (!extension || !isCodeFileExtension(extension)) {
     return null // 不是编程文件则返回null
   }
@@ -884,7 +913,14 @@ function detectLanguageFromExtension(extension) {
     gql: 'graphql'
   }
 
-  return languageMap[extension.toLowerCase()] || 'unknown'
+  const baseLanguage = languageMap[extension.toLowerCase()] || 'unknown'
+
+  // 特殊处理：Java测试文件识别
+  if (baseLanguage === 'java' && filePath && isJavaTestFile(filePath)) {
+    return 'java-test'
+  }
+
+  return baseLanguage
 }
 
 module.exports = {
@@ -896,5 +932,6 @@ module.exports = {
   analyzeBashCommand,
   processOtherTool,
   detectLanguageFromExtension,
-  isCodeFileExtension
+  isCodeFileExtension,
+  isJavaTestFile
 }

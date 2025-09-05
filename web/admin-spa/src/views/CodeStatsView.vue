@@ -199,24 +199,120 @@
 
         <!-- 排行榜 -->
         <div class="rounded-lg bg-white p-6 shadow-lg">
-          <h3 class="mb-4 text-lg font-semibold text-gray-900">
-            🏆 {{ getOverviewCardTitle('') }}排行榜
-          </h3>
+          <div class="mb-4 flex items-center justify-between">
+            <h3 class="text-lg font-semibold text-gray-900">
+              🏆 {{ getOverviewCardTitle('') }}排行榜
+            </h3>
+            <!-- 列选择器按钮 -->
+            <div class="relative">
+              <button
+                @click.stop="showColumnSelector = !showColumnSelector"
+                class="flex items-center gap-2 rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                <i class="fas fa-cog"></i>
+                列设置
+              </button>
+              <!-- 列选择器下拉菜单 -->
+              <div
+                v-if="showColumnSelector"
+                class="column-selector absolute right-0 z-10 mt-2 w-48 rounded-lg bg-white p-4 shadow-lg ring-1 ring-black ring-opacity-5"
+              >
+                <div class="mb-2 text-sm font-medium text-gray-900">显示列</div>
+                <div class="space-y-2">
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.rank"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">排名</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.userName"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">用户名</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.totalEditedLines"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">编辑行数</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.totalTestLines"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">单测行数</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.totalNewFiles"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">新建文件次数</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.totalModifiedFiles"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">修改文件次数</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.totalRequests"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">请求数</span>
+                  </label>
+                  <label class="flex items-center">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.totalCost"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">费用</span>
+                  </label>
+                  <label class="flex items-center" v-if="overviewTimePeriod !== 'today'">
+                    <input
+                      type="checkbox"
+                      v-model="visibleColumns.activeDays"
+                      class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+                    />
+                    <span class="ml-2 text-sm text-gray-700">活跃天数</span>
+                  </label>
+                </div>
+              </div>
+            </div>
+          </div>
           <div class="overflow-hidden rounded-lg border border-gray-200">
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gray-50">
                 <tr>
                   <th
+                    v-if="visibleColumns.rank"
                     class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
                   >
                     排名
                   </th>
                   <th
+                    v-if="visibleColumns.userName"
                     class="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500"
                   >
                     用户名
                   </th>
                   <th
+                    v-if="visibleColumns.totalEditedLines"
                     class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                     @click="sortLeaderboard('totalEditedLines')"
                   >
@@ -237,6 +333,28 @@
                     </div>
                   </th>
                   <th
+                    v-if="visibleColumns.totalTestLines"
+                    class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
+                    @click="sortLeaderboard('totalTestLines')"
+                  >
+                    <div class="flex items-center">
+                      单测行数
+                      <span class="ml-1">
+                        <i
+                          v-if="leaderboardSortBy === 'totalTestLines'"
+                          :class="
+                            leaderboardSortOrder === 'desc'
+                              ? 'fas fa-chevron-down'
+                              : 'fas fa-chevron-up'
+                          "
+                          class="text-xs text-blue-500"
+                        ></i>
+                        <i v-else class="fas fa-sort text-xs text-gray-400"></i>
+                      </span>
+                    </div>
+                  </th>
+                  <th
+                    v-if="visibleColumns.totalNewFiles"
                     class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                     @click="sortLeaderboard('totalNewFiles')"
                   >
@@ -257,6 +375,7 @@
                     </div>
                   </th>
                   <th
+                    v-if="visibleColumns.totalModifiedFiles"
                     class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                     @click="sortLeaderboard('totalModifiedFiles')"
                   >
@@ -277,6 +396,7 @@
                     </div>
                   </th>
                   <th
+                    v-if="visibleColumns.totalRequests"
                     class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                     @click="sortLeaderboard('totalRequests')"
                   >
@@ -297,6 +417,7 @@
                     </div>
                   </th>
                   <th
+                    v-if="visibleColumns.totalCost"
                     class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                     @click="sortLeaderboard('totalCost')"
                   >
@@ -318,7 +439,7 @@
                   </th>
                   <!-- 活跃天数列（仅非当天显示） -->
                   <th
-                    v-if="overviewTimePeriod !== 'today'"
+                    v-if="overviewTimePeriod !== 'today' && visibleColumns.activeDays"
                     class="cursor-pointer px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 hover:bg-gray-100"
                     @click="sortLeaderboard('activeDays')"
                   >
@@ -342,7 +463,10 @@
               </thead>
               <tbody class="divide-y divide-gray-200 bg-white">
                 <tr v-for="(user, index) in paginatedLeaderboard" :key="user.keyId">
-                  <td class="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900">
+                  <td
+                    v-if="visibleColumns.rank"
+                    class="whitespace-nowrap px-6 py-4 text-sm font-medium text-gray-900"
+                  >
                     <span
                       class="inline-flex h-8 w-8 items-center justify-center rounded-full"
                       :class="getRankClass(index + (leaderboardPage - 1) * leaderboardPageSize)"
@@ -350,27 +474,51 @@
                       {{ index + 1 + (leaderboardPage - 1) * leaderboardPageSize }}
                     </span>
                   </td>
-                  <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                  <td
+                    v-if="visibleColumns.userName"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
                     {{ user.userName }}
                   </td>
-                  <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                  <td
+                    v-if="visibleColumns.totalEditedLines"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
                     {{ user.totalEditedLines }}
                   </td>
-                  <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                  <td
+                    v-if="visibleColumns.totalTestLines"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
+                    {{ user.totalTestLines || 0 }}
+                  </td>
+                  <td
+                    v-if="visibleColumns.totalNewFiles"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
                     {{ user.totalNewFiles }}
                   </td>
-                  <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                  <td
+                    v-if="visibleColumns.totalModifiedFiles"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
                     {{ user.totalModifiedFiles }}
                   </td>
-                  <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                  <td
+                    v-if="visibleColumns.totalRequests"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
                     {{ formatNumber(user.totalRequests || 0) }}
                   </td>
-                  <td class="whitespace-nowrap px-6 py-4 text-sm text-gray-900">
+                  <td
+                    v-if="visibleColumns.totalCost"
+                    class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
+                  >
                     ${{ (user.totalCost || 0).toFixed(4) }}
                   </td>
                   <!-- 活跃天数列（仅非当天显示） -->
                   <td
-                    v-if="overviewTimePeriod !== 'today'"
+                    v-if="overviewTimePeriod !== 'today' && visibleColumns.activeDays"
                     class="whitespace-nowrap px-6 py-4 text-sm text-gray-900"
                   >
                     {{ user.activeDays || 0 }} 天
@@ -631,7 +779,7 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick, computed, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, computed, watch } from 'vue'
 import { Chart, registerables } from 'chart.js'
 import StatCard from '@/components/common/StatCard.vue'
 import { showToast } from '@/utils/toast'
@@ -645,6 +793,20 @@ const systemStats = ref(null)
 const leaderboard = ref([])
 const languageStats = ref({})
 const trendData = ref([])
+
+// 列显示控制
+const visibleColumns = ref({
+  rank: true,
+  userName: true,
+  totalEditedLines: true,
+  totalTestLines: true,
+  totalNewFiles: true,
+  totalModifiedFiles: true,
+  totalRequests: true,
+  totalCost: true,
+  activeDays: true
+})
+const showColumnSelector = ref(false)
 
 // 工具统计数据
 const toolStats = ref({})
@@ -1556,9 +1718,28 @@ watch(activeTab, async (newTab) => {
   renderCurrentTabCharts()
 })
 
+// 点击外部关闭列选择器
+function handleClickOutside(event) {
+  // 如果点击的是按钮本身，不关闭下拉菜单
+  if (event.target.closest('button')?.innerText?.includes('列设置')) {
+    return
+  }
+
+  const selector = document.querySelector('.column-selector')
+  if (selector && !selector.contains(event.target)) {
+    showColumnSelector.value = false
+  }
+}
+
 // 组件挂载
 onMounted(() => {
   initializeData()
+  document.addEventListener('click', handleClickOutside)
+})
+
+// 组件卸载
+onUnmounted(() => {
+  document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
