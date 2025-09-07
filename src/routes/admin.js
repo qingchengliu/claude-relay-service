@@ -6626,4 +6626,12 @@ router.post('/claude-code-version/clear', authenticateAdmin, async (req, res) =>
   }
 })
 
+// OpenAI Console Routes - minimal change
+try {
+  const openaiConsoleAdminRoutes = require('./openaiConsoleAdmin')
+  router.use('/', openaiConsoleAdminRoutes)
+} catch (e) {
+  // OpenAI Console admin routes not available
+}
+
 module.exports = router

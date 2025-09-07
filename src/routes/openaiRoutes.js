@@ -5,6 +5,8 @@ const logger = require('../utils/logger')
 const { authenticateApiKey } = require('../middleware/auth')
 const unifiedOpenAIScheduler = require('../services/unifiedOpenAIScheduler')
 const openaiAccountService = require('../services/openaiAccountService')
+const openaiConsoleAccountService = require('../services/openaiConsoleAccountService')
+const openaiConsoleRelayService = require('../services/openaiConsoleRelayService')
 const apiKeyService = require('../services/apiKeyService')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
@@ -34,10 +36,27 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
     }
 
     // 获取账户详情
-    let account = await openaiAccountService.getAccount(result.accountId)
-    if (!account || !account.accessToken) {
-      throw new Error(`OpenAI account ${result.accountId} has no valid accessToken`)
-    }
+    let account = null
+    if (result.accountType === 'openai-console') {
+      // OpenAI Console 账户
+      account = await openaiConsoleAccountService.getAccount(result.accountId)
+      if (!account || !account.apiKey) {
+        throw new Error(`OpenAI Console account ${result.accountId} has no valid API key`)
+      }
+      
+      logger.info(`Selected OpenAI Console account: ${account.name} (${result.accountId})`)
+      return {
+        account,
+        accountId: result.accountId,
+        accountName: account.name,
+        accountType: 'openai-console'
+      }
+    } else {
+      // OpenAI OAuth 账户
+      account = await openaiAccountService.getAccount(result.accountId)
+      if (!account || !account.accessToken) {
+        throw new Error(`OpenAI account ${result.accountId} has no valid accessToken`)
+      }
 
     // 检查 token 是否过期并自动刷新（双重保护）
     if (openaiAccountService.isTokenExpired(account)) {
@@ -73,13 +92,15 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
       }
     }
 
-    logger.info(`Selected OpenAI account: ${account.name} (${result.accountId})`)
-    return {
-      accessToken,
-      accountId: result.accountId,
-      accountName: account.name,
-      proxy,
-      account
+      logger.info(`Selected OpenAI account: ${account.name} (${result.accountId})`)
+      return {
+        accessToken,
+        accountId: result.accountId,
+        accountName: account.name,
+        proxy,
+        account,
+        accountType: 'openai'
+      }
     }
   } catch (error) {
     logger.error('Failed to get OpenAI auth token:', error)
@@ -145,13 +166,62 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     }
 
     // 使用调度器选择账户
+    const authResult = await getOpenAIAuthToken(apiKeyData, sessionId, requestedModel)
+    
+    // 判断账户类型，使用不同的转发服务
+    if (authResult.accountType === 'openai-console') {
+      // 使用 OpenAI Console 转发服务
+      const relayResult = await openaiConsoleRelayService.relay(
+        authResult.account,
+        req.body,
+        req.headers
+      )
+      
+      // 设置响应状态和头部
+      res.status(relayResult.status)
+      Object.entries(relayResult.headers).forEach(([key, value]) => {
+        res.setHeader(key, value)
+      })
+      
+      // 处理响应
+      if (relayResult.stream) {
+        // 流式响应
+        relayResult.stream.pipe(res)
+        
+        // 处理客户端断开连接
+        req.on('close', () => {
+          logger.info('📌 Client disconnected during OpenAI Console streaming')
+          if (relayResult.stream && typeof relayResult.stream.destroy === 'function') {
+            relayResult.stream.destroy()
+          }
+        })
+      } else {
+        // 非流式响应
+        res.json(relayResult.data)
+      }
+      
+      // 记录 API Key 使用
+      await apiKeyService.recordUsage(
+        apiKeyData.id,
+        0, // usage 已在 relay 服务中记录
+        0,
+        0,
+        0,
+        requestedModel,
+        authResult.accountId
+      )
+      
+      return
+    }
+    
+    // 原有的 OpenAI OAuth 账户处理逻辑
     const {
       accessToken,
       accountId,
       accountName: _accountName,
       proxy,
       account
-    } = await getOpenAIAuthToken(apiKeyData, sessionId, requestedModel)
+    } = authResult
     // 基于白名单构造上游所需的请求头，确保键为小写且值受控
     const incoming = req.headers || {}
 

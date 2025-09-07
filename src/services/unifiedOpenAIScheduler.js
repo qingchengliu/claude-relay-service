@@ -1,4 +1,5 @@
 const openaiAccountService = require('./openaiAccountService')
+const openaiConsoleAccountService = require('./openaiConsoleAccountService')
 const accountGroupService = require('./accountGroupService')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
@@ -167,6 +168,9 @@ class UnifiedOpenAIScheduler {
 
     // 获取所有OpenAI账户（共享池）
     const openaiAccounts = await openaiAccountService.getAllAccounts()
+    
+    // 获取所有OpenAI Console账户（共享池）
+    const openaiConsoleAccounts = await openaiConsoleAccountService.getAllAccounts()
     for (let account of openaiAccounts) {
       if (
         account.isActive &&
@@ -227,6 +231,41 @@ class UnifiedOpenAIScheduler {
         })
       }
     }
+    
+    // 处理 OpenAI Console 账户
+    for (let account of openaiConsoleAccounts) {
+        if (
+          account.isActive === 'true' &&
+          account.status === 'active' &&
+          this._isSchedulable(account.schedulable)
+        ) {
+          // 检查模型支持
+          if (requestedModel && account.supportedModels && account.supportedModels.length > 0) {
+            const modelSupported = account.supportedModels.includes(requestedModel)
+            if (!modelSupported) {
+              logger.debug(
+                `⏭️ Skipping OpenAI Console account ${account.name} - doesn't support model ${requestedModel}`
+              )
+              continue
+            }
+          }
+
+          // 检查是否被限流
+          const isRateLimited = await this.isAccountRateLimited(account.id, 'openai-console')
+          if (isRateLimited) {
+            logger.debug(`⏭️ Skipping OpenAI Console account ${account.name} - rate limited`)
+            continue
+          }
+
+          availableAccounts.push({
+            ...account,
+            accountId: account.id,
+            accountType: 'openai-console',
+            priority: parseInt(account.priority) || 50,
+            lastUsedAt: account.lastUsedAt || '0'
+          })
+        }
+      }
 
     return availableAccounts
   }
@@ -260,6 +299,17 @@ class UnifiedOpenAIScheduler {
           return false
         }
         return !(await this.isAccountRateLimited(accountId))
+      } else if (accountType === 'openai-console') {
+        const account = await openaiConsoleAccountService.getAccount(accountId)
+        if (!account || account.isActive !== 'true' || account.status !== 'active') {
+          return false
+        }
+        // 检查是否可调度
+        if (!this._isSchedulable(account.schedulable)) {
+          logger.info(`🚫 OpenAI Console account ${accountId} is not schedulable`)
+          return false
+        }
+        return !(await this.isAccountRateLimited(accountId, 'openai-console'))
       }
       return false
     } catch (error) {
@@ -305,6 +355,12 @@ class UnifiedOpenAIScheduler {
     try {
       if (accountType === 'openai') {
         await openaiAccountService.setAccountRateLimited(accountId, true)
+      } else if (accountType === 'openai-console') {
+        // OpenAI Console 账户的限流状态更新
+        await openaiConsoleAccountService.updateAccount(accountId, {
+          rateLimitStatus: 'limited',
+          rateLimitedAt: new Date().toISOString()
+        })
       }
 
       // 删除会话映射
@@ -327,6 +383,12 @@ class UnifiedOpenAIScheduler {
     try {
       if (accountType === 'openai') {
         await openaiAccountService.setAccountRateLimited(accountId, false)
+      } else if (accountType === 'openai-console') {
+        // OpenAI Console 账户的限流状态清除
+        await openaiConsoleAccountService.updateAccount(accountId, {
+          rateLimitStatus: 'normal',
+          rateLimitedAt: ''
+        })
       }
 
       return { success: true }
@@ -340,9 +402,14 @@ class UnifiedOpenAIScheduler {
   }
 
   // 🔍 检查账户是否处于限流状态
-  async isAccountRateLimited(accountId) {
+  async isAccountRateLimited(accountId, accountType = 'openai') {
     try {
-      const account = await openaiAccountService.getAccount(accountId)
+      let account
+      if (accountType === 'openai-console' && openaiConsoleAccountService) {
+        account = await openaiConsoleAccountService.getAccount(accountId)
+      } else {
+        account = await openaiAccountService.getAccount(accountId)
+      }
       if (!account) {
         return false
       }
