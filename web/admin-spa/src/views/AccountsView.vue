@@ -995,6 +995,7 @@ const platformOptions = ref([
   { value: 'claude-console', label: 'Claude Console', icon: 'fa-terminal' },
   { value: 'gemini', label: 'Gemini', icon: 'fa-google' },
   { value: 'openai', label: 'OpenAi', icon: 'fa-openai' },
+  { value: 'openai-console', label: 'OpenAI Console', icon: 'fa-code' },
   { value: 'azure_openai', label: 'Azure OpenAI', icon: 'fab fa-microsoft' },
   { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' }
 ])
@@ -1101,7 +1102,8 @@ const loadAccounts = async (forceReload = false) => {
         apiClient.get('/admin/bedrock-accounts', { params }),
         apiClient.get('/admin/gemini-accounts', { params }),
         apiClient.get('/admin/openai-accounts', { params }),
-        apiClient.get('/admin/azure-openai-accounts', { params })
+        apiClient.get('/admin/azure-openai-accounts', { params }),
+        apiClient.get('/admin/openai-console-accounts', { params })
       )
     } else {
       // 只请求指定平台，其他平台设为null占位
@@ -1113,7 +1115,8 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
-            Promise.resolve({ success: true, data: [] }) // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-console 占位
           )
           break
         case 'claude-console':
@@ -1123,7 +1126,8 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
-            Promise.resolve({ success: true, data: [] }) // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-console 占位
           )
           break
         case 'bedrock':
@@ -1133,7 +1137,8 @@ const loadAccounts = async (forceReload = false) => {
             apiClient.get('/admin/bedrock-accounts', { params }),
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
-            Promise.resolve({ success: true, data: [] }) // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-console 占位
           )
           break
         case 'gemini':
@@ -1143,7 +1148,8 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
             apiClient.get('/admin/gemini-accounts', { params }),
             Promise.resolve({ success: true, data: [] }), // openai 占位
-            Promise.resolve({ success: true, data: [] }) // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-console 占位
           )
           break
         case 'openai':
@@ -1153,7 +1159,8 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             apiClient.get('/admin/openai-accounts', { params }),
-            Promise.resolve({ success: true, data: [] }) // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            Promise.resolve({ success: true, data: [] }) // openai-console 占位
           )
           break
         case 'azure_openai':
@@ -1163,12 +1170,25 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // bedrock 占位
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
-            apiClient.get('/admin/azure-openai-accounts', { params })
+            apiClient.get('/admin/azure-openai-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }) // openai-console 占位
+          )
+          break
+        case 'openai-console':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure-openai 占位
+            apiClient.get('/admin/openai-console-accounts', { params }) // openai-console
           )
           break
         default:
           // 默认情况下返回空数组
           requests.push(
+            Promise.resolve({ success: true, data: [] }),
             Promise.resolve({ success: true, data: [] }),
             Promise.resolve({ success: true, data: [] }),
             Promise.resolve({ success: true, data: [] }),
@@ -1186,7 +1206,7 @@ const loadAccounts = async (forceReload = false) => {
     // 后端账户API已经包含分组信息，不需要单独加载分组成员关系
     // await loadGroupMembers(forceReload)
 
-    const [claudeData, claudeConsoleData, bedrockData, geminiData, openaiData, azureOpenaiData] =
+    const [claudeData, claudeConsoleData, bedrockData, geminiData, openaiData, azureOpenaiData, openaiConsoleData] =
       await Promise.all(requests)
 
     const allAccounts = []
@@ -1253,6 +1273,18 @@ const loadAccounts = async (forceReload = false) => {
         return { ...acc, platform: 'azure_openai', boundApiKeysCount }
       })
       allAccounts.push(...azureOpenaiAccounts)
+    }
+
+    if (openaiConsoleData && openaiConsoleData.success) {
+      const openaiConsoleAccounts = (openaiConsoleData.data || []).map((acc) => {
+        // 计算每个 OpenAI Console 账户绑定的 API Key 数量
+        const boundApiKeysCount = apiKeys.value.filter(
+          (key) => key.openaiAccountId === acc.id
+        ).length
+        // 后端已经包含了 groupInfos，直接使用
+        return { ...acc, platform: 'openai-console', boundApiKeysCount }
+      })
+      allAccounts.push(...openaiConsoleAccounts)
     }
 
     // 根据分组筛选器过滤账户

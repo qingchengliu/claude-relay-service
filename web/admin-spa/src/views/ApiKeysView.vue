@@ -1633,10 +1633,12 @@ const accounts = ref({
   claude: [],
   gemini: [],
   openai: [],
+  openaiConsole: [],
   bedrock: [],
   claudeGroups: [],
   geminiGroups: [],
-  openaiGroups: []
+  openaiGroups: [],
+  openaiConsoleGroups: []
 })
 const editingExpiryKey = ref(null)
 const expiryEditModalRef = ref(null)
@@ -1795,12 +1797,13 @@ const paginatedApiKeys = computed(() => {
 // 加载账户列表
 const loadAccounts = async () => {
   try {
-    const [claudeData, claudeConsoleData, geminiData, openaiData, bedrockData, groupsData] =
+    const [claudeData, claudeConsoleData, geminiData, openaiData, openaiConsoleData, bedrockData, groupsData] =
       await Promise.all([
         apiClient.get('/admin/claude-accounts'),
         apiClient.get('/admin/claude-console-accounts'),
         apiClient.get('/admin/gemini-accounts'),
         apiClient.get('/admin/openai-accounts'),
+        apiClient.get('/admin/openai-console-accounts'),
         apiClient.get('/admin/bedrock-accounts'),
         apiClient.get('/admin/account-groups')
       ])
@@ -1844,6 +1847,13 @@ const loadAccounts = async () => {
       }))
     }
 
+    if (openaiConsoleData.success) {
+      accounts.value.openaiConsole = (openaiConsoleData.data || []).map((account) => ({
+        ...account,
+        isDedicated: account.accountType === 'dedicated'
+      }))
+    }
+
     if (bedrockData.success) {
       accounts.value.bedrock = (bedrockData.data || []).map((account) => ({
         ...account,
@@ -1857,6 +1867,7 @@ const loadAccounts = async () => {
       accounts.value.claudeGroups = allGroups.filter((g) => g.platform === 'claude')
       accounts.value.geminiGroups = allGroups.filter((g) => g.platform === 'gemini')
       accounts.value.openaiGroups = allGroups.filter((g) => g.platform === 'openai')
+      accounts.value.openaiConsoleGroups = allGroups.filter((g) => g.platform === 'openai-console')
     }
   } catch (error) {
     console.error('加载账户列表失败:', error)
@@ -1967,6 +1978,12 @@ const getBoundAccountName = (accountId) => {
     return `${openaiAccount.name}`
   }
 
+  // 从OpenAI Console账户列表中查找
+  const openaiConsoleAccount = accounts.value.openaiConsole.find((acc) => acc.id === accountId)
+  if (openaiConsoleAccount) {
+    return `${openaiConsoleAccount.name}`
+  }
+
   // 从Bedrock账户列表中查找
   const bedrockAccount = accounts.value.bedrock.find((acc) => acc.id === accountId)
   if (bedrockAccount) {
@@ -2033,15 +2050,26 @@ const getOpenAIBindingInfo = (key) => {
     if (key.openaiAccountId.startsWith('group:')) {
       return info
     }
-    // 检查账户是否存在
-    const account = accounts.value.openai.find((acc) => acc.id === key.openaiAccountId)
-    if (!account) {
-      return `⚠️ ${info} (账户不存在)`
+    // 先检查是否是 OpenAI OAuth 账户
+    let account = accounts.value.openai.find((acc) => acc.id === key.openaiAccountId)
+    if (account) {
+      if (account.accountType === 'dedicated') {
+        return `🔒 专属-${info}`
+      }
+      return info
     }
-    if (account.accountType === 'dedicated') {
-      return `🔒 专属-${info}`
+    
+    // 再检查是否是 OpenAI Console 账户
+    account = accounts.value.openaiConsole.find((acc) => acc.id === key.openaiAccountId)
+    if (account) {
+      if (account.accountType === 'dedicated') {
+        return `🔒 专属-${info} (Console)`
+      }
+      return `${info} (Console)`
     }
-    return info
+    
+    // 账户不存在
+    return `⚠️ ${info} (账户不存在)`
   }
   return ''
 }

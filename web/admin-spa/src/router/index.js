@@ -15,6 +15,7 @@ const AccountsView = () => import('@/views/AccountsView.vue')
 const TutorialView = () => import('@/views/TutorialView.vue')
 const SettingsView = () => import('@/views/SettingsView.vue')
 const ApiStatsView = () => import('@/views/ApiStatsView.vue')
+const OpenAIConsoleAccounts = () => import('@/views/OpenAIConsoleAccounts.vue')
 
 const routes = [
   {
@@ -118,6 +119,18 @@ const routes = [
         path: '',
         name: 'Settings',
         component: SettingsView
+      }
+    ]
+  },
+  {
+    path: '/openai-console-accounts',
+    component: MainLayout,
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'OpenAIConsoleAccounts',
+        component: OpenAIConsoleAccounts
       }
     ]
   },

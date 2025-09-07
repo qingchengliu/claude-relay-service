@@ -139,4 +139,182 @@
 - 推荐扩展现有统一调度器（如 unifiedOpenAIScheduler）以纳入 openai-console 账户类型：
   - 获取候选时同时汇聚 OAuth（openai）与 Console（openai-console）两类来源，再按 3.1 排序；
   - 或者为 Console 维护独立的聚合逻辑，但对外通过同一套粘性会话键与状态标记，保持体验一致。
-- API Key 可绑定到分组或专属账户；若两类账户（OAuth 与 Console）均配置，实际使用哪个由绑定对象与分组平台决定；无额外“启用/优先级”新字段。
+- API Key 可绑定到分组或专属账户；若两类账户（OAuth 与 Console）均配置，实际使用哪个由绑定对象与分组平台决定；无额外"启用/优先级"新字段。
+
+## 最终实现架构
+
+### 后端实现
+
+#### 1. 核心服务模块
+
+**openaiConsoleAccountService.js** (新建)
+- 位置：`src/services/openaiConsoleAccountService.js`
+- 职责：OpenAI Console账户的完整生命周期管理
+- 功能：
+  - 使用AES-256-CBC加密存储API密钥
+  - 提供完整的CRUD操作接口
+  - 支持账户连通性测试
+  - Redis键：`openai_console_account:{id}`
+
+**openaiConsoleRelayService.js** (新建)
+- 位置：`src/services/openaiConsoleRelayService.js`
+- 职责：处理请求转发和响应处理
+- 功能：
+  - 构建上游请求头（包含OpenAI-Beta: responses=experimental）
+  - 支持SSE流式响应转发
+  - 支持非流式JSON响应
+  - 解析usage数据并记录统计
+  - 代理支持（HTTP/SOCKS5）
+
+#### 2. 路由集成
+
+**openaiConsoleAdmin.js** (新建)
+- 位置：`src/routes/openaiConsoleAdmin.js`
+- 独立的管理路由文件
+- 端点：
+  ```
+  GET    /admin/openai-console-accounts       # 列表
+  POST   /admin/openai-console-accounts       # 创建
+  PUT    /admin/openai-console-accounts/:id   # 更新
+  DELETE /admin/openai-console-accounts/:id   # 删除
+  POST   /admin/openai-console-accounts/:id/test # 测试
+  ```
+
+**admin.js** (最小化修改)
+- 仅添加3行代码引入openaiConsoleAdmin路由：
+  ```javascript
+  try {
+    const openaiConsoleAdminRoutes = require('./openaiConsoleAdmin')
+    router.use('/', openaiConsoleAdminRoutes)
+  } catch (e) {}
+  ```
+
+**openaiRoutes.js** (最小化修改)
+- 在`/openai/responses`端点添加OpenAI Console支持
+- 路由决策逻辑：
+  1. 检查API Key的openaiConsoleAccountId绑定
+  2. 若绑定则使用openaiConsoleRelayService转发
+  3. 否则走现有OAuth/Azure流程
+
+#### 3. 调度器集成
+
+**unifiedOpenAIScheduler.js** (最小化修改)
+- 直接导入openaiConsoleAccountService（无条件加载判断）
+- 在账户聚合时包含OpenAI Console账户
+- 复用现有的粘性会话和优先级机制
+
+### 前端实现
+
+#### 1. 账户管理界面
+
+**OpenAIConsoleAccounts.vue** (新建)
+- 位置：`web/admin-spa/src/views/OpenAIConsoleAccounts.vue`
+- 完整的账户管理UI组件
+- 功能：
+  - 账户列表展示（表格/卡片双模式）
+  - 创建/编辑账户对话框
+  - 连通性测试
+  - 代理配置
+  - 支持暗黑模式和响应式设计
+
+#### 2. 现有视图集成
+
+**AccountsView.vue** (最小化修改)
+- 添加'openai-console'到平台选项
+- 支持加载和显示OpenAI Console账户
+- 复用现有的账户显示组件
+
+**ApiKeysView.vue** (最小化修改)
+- 在账户绑定部分支持OpenAI Console
+- 更新getBoundAccountName函数识别新账户类型
+- 更新getOpenAIBindingInfo函数处理Console账户
+
+**TabBar.vue** (未修改)
+- 现有导航结构已满足需求，无需修改
+
+**router/index.js** (最小化修改)
+- 添加OpenAI Console账户管理路由：
+  ```javascript
+  {
+    path: '/openai-console-accounts',
+    component: MainLayout,
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'OpenAIConsoleAccounts',
+        component: OpenAIConsoleAccounts
+      }
+    ]
+  }
+  ```
+
+### 技术决策
+
+1. **加密方案**：使用AES-256-CBC对API密钥进行加密存储，与现有系统保持一致
+
+2. **最小化改动原则**：
+   - 创建独立的服务和路由文件
+   - 现有文件仅添加必要的引用和条件分支
+   - 避免修改核心业务逻辑
+
+3. **路由策略**：基于API Key的专属绑定，不引入新的全局优先级配置
+
+4. **前端架构**：
+   - 使用Vue 3 Composition API
+   - 支持响应式设计和暗黑模式
+   - 复用现有的UI组件和样式系统
+
+### 数据模型
+
+OpenAI Console账户结构：
+```javascript
+{
+  id: string,
+  name: string,
+  baseUrl: string,
+  responsesPath: string (默认: /v1/responses),
+  authType: 'bearer' | 'x-api-key',
+  apiKey: string (加密存储),
+  isActive: boolean,
+  schedulable: boolean,
+  priority: number,
+  proxy: {
+    type: string,
+    host: string,
+    port: number,
+    username: string,
+    password: string
+  },
+  supportedModels: array,
+  headers: object,
+  status: string,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  lastUsedAt: timestamp
+}
+```
+
+### 使用流程
+
+1. **账户配置**：
+   - 管理员在OpenAI Console账户页面创建账户
+   - 配置BaseURL、认证方式、代理等
+   - 测试连通性
+
+2. **API Key绑定**：
+   - 在API Key管理页面选择OpenAI Console账户绑定
+   - 系统自动将该Key的请求路由到绑定的Console账户
+
+3. **请求处理**：
+   - 客户端使用API Key调用`/openai/responses`
+   - 系统根据绑定关系选择OpenAI Console账户
+   - 通过openaiConsoleRelayService转发请求
+   - 返回流式或非流式响应并记录usage
+
+### 监控与观测
+
+- 请求日志记录所有转发详情
+- Usage统计集成到现有系统
+- 错误追踪包含上游状态码和错误信息
+- 代理连接状态监控
