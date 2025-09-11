@@ -2,9 +2,12 @@ const express = require('express')
 const axios = require('axios')
 const router = express.Router()
 const logger = require('../utils/logger')
+const config = require('../../config/config')
 const { authenticateApiKey } = require('../middleware/auth')
 const unifiedOpenAIScheduler = require('../services/unifiedOpenAIScheduler')
 const openaiAccountService = require('../services/openaiAccountService')
+const openaiResponsesAccountService = require('../services/openaiResponsesAccountService')
+const openaiResponsesRelayService = require('../services/openaiResponsesRelayService')
 const apiKeyService = require('../services/apiKeyService')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
@@ -33,51 +36,81 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
       throw new Error('No available OpenAI account found')
     }
 
-    // 获取账户详情
-    let account = await openaiAccountService.getAccount(result.accountId)
-    if (!account || !account.accessToken) {
-      throw new Error(`OpenAI account ${result.accountId} has no valid accessToken`)
-    }
+    // 根据账户类型获取账户详情
+    let account,
+      accessToken,
+      proxy = null
 
-    // 检查 token 是否过期并自动刷新（双重保护）
-    if (openaiAccountService.isTokenExpired(account)) {
-      if (account.refreshToken) {
-        logger.info(`🔄 Token expired, auto-refreshing for account ${account.name} (fallback)`)
+    if (result.accountType === 'openai-responses') {
+      // 处理 OpenAI-Responses 账户
+      account = await openaiResponsesAccountService.getAccount(result.accountId)
+      if (!account || !account.apiKey) {
+        throw new Error(`OpenAI-Responses account ${result.accountId} has no valid apiKey`)
+      }
+
+      // OpenAI-Responses 账户不需要 accessToken，直接返回账户信息
+      accessToken = null // OpenAI-Responses 使用账户内的 apiKey
+
+      // 解析代理配置
+      if (account.proxy) {
         try {
-          await openaiAccountService.refreshAccountToken(result.accountId)
-          // 重新获取更新后的账户
-          account = await openaiAccountService.getAccount(result.accountId)
-          logger.info(`✅ Token refreshed successfully in route handler`)
-        } catch (refreshError) {
-          logger.error(`Failed to refresh token for ${account.name}:`, refreshError)
-          throw new Error(`Token expired and refresh failed: ${refreshError.message}`)
+          proxy = typeof account.proxy === 'string' ? JSON.parse(account.proxy) : account.proxy
+        } catch (e) {
+          logger.warn('Failed to parse proxy configuration:', e)
         }
-      } else {
-        throw new Error(`Token expired and no refresh token available for account ${account.name}`)
       }
-    }
 
-    // 解密 accessToken（account.accessToken 是加密的）
-    const accessToken = openaiAccountService.decrypt(account.accessToken)
-    if (!accessToken) {
-      throw new Error('Failed to decrypt OpenAI accessToken')
-    }
-
-    // 解析代理配置
-    let proxy = null
-    if (account.proxy) {
-      try {
-        proxy = typeof account.proxy === 'string' ? JSON.parse(account.proxy) : account.proxy
-      } catch (e) {
-        logger.warn('Failed to parse proxy configuration:', e)
+      logger.info(`Selected OpenAI-Responses account: ${account.name} (${result.accountId})`)
+    } else {
+      // 处理普通 OpenAI 账户
+      account = await openaiAccountService.getAccount(result.accountId)
+      if (!account || !account.accessToken) {
+        throw new Error(`OpenAI account ${result.accountId} has no valid accessToken`)
       }
+
+      // 检查 token 是否过期并自动刷新（双重保护）
+      if (openaiAccountService.isTokenExpired(account)) {
+        if (account.refreshToken) {
+          logger.info(`🔄 Token expired, auto-refreshing for account ${account.name} (fallback)`)
+          try {
+            await openaiAccountService.refreshAccountToken(result.accountId)
+            // 重新获取更新后的账户
+            account = await openaiAccountService.getAccount(result.accountId)
+            logger.info(`✅ Token refreshed successfully in route handler`)
+          } catch (refreshError) {
+            logger.error(`Failed to refresh token for ${account.name}:`, refreshError)
+            throw new Error(`Token expired and refresh failed: ${refreshError.message}`)
+          }
+        } else {
+          throw new Error(
+            `Token expired and no refresh token available for account ${account.name}`
+          )
+        }
+      }
+
+      // 解密 accessToken（account.accessToken 是加密的）
+      accessToken = openaiAccountService.decrypt(account.accessToken)
+      if (!accessToken) {
+        throw new Error('Failed to decrypt OpenAI accessToken')
+      }
+
+      // 解析代理配置
+      if (account.proxy) {
+        try {
+          proxy = typeof account.proxy === 'string' ? JSON.parse(account.proxy) : account.proxy
+        } catch (e) {
+          logger.warn('Failed to parse proxy configuration:', e)
+        }
+      }
+
+      logger.info(`Selected OpenAI account: ${account.name} (${result.accountId})`)
     }
 
-    logger.info(`Selected OpenAI account: ${account.name} (${result.accountId})`)
     return {
       accessToken,
       accountId: result.accountId,
       accountName: account.name,
+      accountType: result.accountType,
       proxy,
       account
     }
@@ -87,7 +120,8 @@ async function getOpenAIAuthToken(apiKeyData, sessionId = null, requestedModel =
   }
 }
 
-router.post('/responses', authenticateApiKey, async (req, res) => {
+// 主处理函数，供两个路由共享
+const handleResponses = async (req, res) => {
   let upstream = null
   try {
     // 从中间件获取 API Key 数据
@@ -149,9 +183,16 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
       accessToken,
       accountId,
       accountName: _accountName,
+      accountType,
       proxy,
       account
     } = await getOpenAIAuthToken(apiKeyData, sessionId, requestedModel)
+
+    // 如果是 OpenAI-Responses 账户，使用专门的中继服务处理
+    if (accountType === 'openai-responses') {
+      logger.info(`🔀 Using OpenAI-Responses relay service for account: ${account.name}`)
+      return await openaiResponsesRelayService.handleRequest(req, res, account, apiKeyData)
+    }
     // 基于白名单构造上游所需的请求头，确保键为小写且值受控
     const incoming = req.headers || {}
 
@@ -178,7 +219,7 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     // 配置请求选项
     const axiosConfig = {
       headers,
-      timeout: 60 * 1000 * 10,
+      timeout: config.requestTimeout || 600000,
       validateStatus: () => true
     }
 
@@ -205,6 +246,96 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
         axiosConfig
       )
     }
+
+    // 处理 429 限流错误
+    if (upstream.status === 429) {
+      logger.warn(`🚫 Rate limit detected for OpenAI account ${accountId} (Codex API)`)
+
+      // 解析响应体中的限流信息
+      let resetsInSeconds = null
+      let errorData = null
+
+      try {
+        // 对于429错误，无论是否是流式请求，响应都会是完整的JSON错误对象
+        if (isStream && upstream.data) {
+          // 流式响应需要先收集数据
+          const chunks = []
+          await new Promise((resolve, reject) => {
+            upstream.data.on('data', (chunk) => chunks.push(chunk))
+            upstream.data.on('end', resolve)
+            upstream.data.on('error', reject)
+            // 设置超时防止无限等待
+            setTimeout(resolve, 5000)
+          })
+
+          const fullResponse = Buffer.concat(chunks).toString()
+          try {
+            errorData = JSON.parse(fullResponse)
+          } catch (e) {
+            logger.error('Failed to parse 429 error response:', e)
+            logger.debug('Raw response:', fullResponse)
+          }
+        } else {
+          // 非流式响应直接使用data
+          errorData = upstream.data
+        }
+
+        // 提取重置时间
+        if (errorData && errorData.error && errorData.error.resets_in_seconds) {
+          resetsInSeconds = errorData.error.resets_in_seconds
+          logger.info(
+            `🕐 Codex rate limit will reset in ${resetsInSeconds} seconds (${Math.ceil(resetsInSeconds / 60)} minutes / ${Math.ceil(resetsInSeconds / 3600)} hours)`
+          )
+        } else {
+          logger.warn(
+            '⚠️ Could not extract resets_in_seconds from 429 response, using default 60 minutes'
+          )
+        }
+      } catch (e) {
+        logger.error('⚠️ Failed to parse rate limit error:', e)
+      }
+
+      // 标记账户为限流状态
+      await unifiedOpenAIScheduler.markAccountRateLimited(
+        accountId,
+        'openai',
+        sessionId ? crypto.createHash('sha256').update(sessionId).digest('hex') : null,
+        resetsInSeconds
+      )
+
+      // 返回错误响应给客户端
+      const errorResponse = errorData || {
+        error: {
+          type: 'usage_limit_reached',
+          message: 'The usage limit has been reached',
+          resets_in_seconds: resetsInSeconds
+        }
+      }
+
+      if (isStream) {
+        // 流式响应也需要设置正确的状态码
+        res.status(429)
+        res.setHeader('Content-Type', 'text/event-stream')
+        res.setHeader('Cache-Control', 'no-cache')
+        res.setHeader('Connection', 'keep-alive')
+        res.write(`data: ${JSON.stringify(errorResponse)}\n\n`)
+        res.end()
+      } else {
+        res.status(429).json(errorResponse)
+      }
+
+      return
+    } else if (upstream.status === 200 || upstream.status === 201) {
+      // 请求成功，检查并移除限流状态
+      const isRateLimited = await unifiedOpenAIScheduler.isAccountRateLimited(accountId)
+      if (isRateLimited) {
+        logger.info(
+          `✅ Removing rate limit for OpenAI account ${accountId} after successful request`
+        )
+        await unifiedOpenAIScheduler.removeAccountRateLimit(accountId, 'openai')
+      }
+    }
+
     res.status(upstream.status)
 
     if (isStream) {
@@ -239,6 +370,8 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
     let usageData = null
     let actualModel = null
     let usageReported = false
+    let rateLimitDetected = false
+    let rateLimitResetsInSeconds = null
 
     if (!isStream) {
       // 非流式响应处理
@@ -317,6 +450,17 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
                 logger.debug('📊 Captured OpenAI usage data:', usageData)
               }
             }
+
+            // 检查是否有限流错误
+            if (eventData.error && eventData.error.type === 'usage_limit_reached') {
+              rateLimitDetected = true
+              if (eventData.error.resets_in_seconds) {
+                rateLimitResetsInSeconds = eventData.error.resets_in_seconds
+                logger.warn(
+                  `🚫 Rate limit detected in stream, resets in ${rateLimitResetsInSeconds} seconds`
+                )
+              }
+            }
           } catch (e) {
             // 忽略解析错误
           }
@@ -388,6 +532,26 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
         }
       }
 
+      // 如果在流式响应中检测到限流
+      if (rateLimitDetected) {
+        logger.warn(`🚫 Processing rate limit for OpenAI account ${accountId} from stream`)
+        await unifiedOpenAIScheduler.markAccountRateLimited(
+          accountId,
+          'openai',
+          sessionId ? crypto.createHash('sha256').update(sessionId).digest('hex') : null,
+          rateLimitResetsInSeconds
+        )
+      } else if (upstream.status === 200) {
+        // 流式请求成功，检查并移除限流状态
+        const isRateLimited = await unifiedOpenAIScheduler.isAccountRateLimited(accountId)
+        if (isRateLimited) {
+          logger.info(
+            `✅ Removing rate limit for OpenAI account ${accountId} after successful stream`
+          )
+          await unifiedOpenAIScheduler.removeAccountRateLimit(accountId, 'openai')
+        }
+      }
+
       res.end()
     })
 
@@ -419,7 +583,11 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
       res.status(status).json({ error: { message } })
     }
   }
-})
+}
+
+// 注册两个路由路径，都使用相同的处理函数
+router.post('/responses', authenticateApiKey, handleResponses)
+router.post('/v1/responses', authenticateApiKey, handleResponses)
 
 // 使用情况统计端点
 router.get('/usage', authenticateApiKey, async (req, res) => {

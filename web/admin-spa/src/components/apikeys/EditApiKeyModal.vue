@@ -32,14 +32,16 @@
               class="mb-1.5 block text-xs font-semibold text-gray-700 dark:text-gray-300 sm:mb-3 sm:text-sm"
               >名称</label
             >
-            <input
-              v-model="form.name"
-              class="form-input w-full border-gray-300 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-              maxlength="100"
-              placeholder="请输入API Key名称"
-              required
-              type="text"
-            />
+            <div>
+              <input
+                v-model="form.name"
+                class="form-input flex-1 border-gray-300 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                maxlength="100"
+                placeholder="请输入API Key名称"
+                required
+                type="text"
+              />
+            </div>
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400 sm:mt-2">
               用于识别此 API Key 的用途
             </p>
@@ -909,15 +911,23 @@ const updateApiKey = async () => {
 const refreshAccounts = async () => {
   accountsLoading.value = true
   try {
-    const [claudeData, claudeConsoleData, geminiData, openaiData, bedrockData, groupsData] =
-      await Promise.all([
-        apiClient.get('/admin/claude-accounts'),
-        apiClient.get('/admin/claude-console-accounts'),
-        apiClient.get('/admin/gemini-accounts'),
-        apiClient.get('/admin/openai-accounts'),
-        apiClient.get('/admin/bedrock-accounts'), // 添加 Bedrock 账号获取
-        apiClient.get('/admin/account-groups')
-      ])
+    const [
+      claudeData,
+      claudeConsoleData,
+      geminiData,
+      openaiData,
+      openaiResponsesData,
+      bedrockData,
+      groupsData
+    ] = await Promise.all([
+      apiClient.get('/admin/claude-accounts'),
+      apiClient.get('/admin/claude-console-accounts'),
+      apiClient.get('/admin/gemini-accounts'),
+      apiClient.get('/admin/openai-accounts'),
+      apiClient.get('/admin/openai-responses-accounts'), // 获取 OpenAI-Responses 账号
+      apiClient.get('/admin/bedrock-accounts'), // 添加 Bedrock 账号获取
+      apiClient.get('/admin/account-groups')
+    ])
 
     // 合并Claude OAuth账户和Claude Console账户
     const claudeAccounts = []
@@ -951,12 +961,30 @@ const refreshAccounts = async () => {
       }))
     }
 
+    // 合并 OpenAI 和 OpenAI-Responses 账号
+    const openaiAccounts = []
+
     if (openaiData.success) {
-      localAccounts.value.openai = (openaiData.data || []).map((account) => ({
-        ...account,
-        isDedicated: account.accountType === 'dedicated'
-      }))
+      ;(openaiData.data || []).forEach((account) => {
+        openaiAccounts.push({
+          ...account,
+          platform: 'openai',
+          isDedicated: account.accountType === 'dedicated'
+        })
+      })
     }
+
+    if (openaiResponsesData.success) {
+      ;(openaiResponsesData.data || []).forEach((account) => {
+        openaiAccounts.push({
+          ...account,
+          platform: 'openai-responses',
+          isDedicated: account.accountType === 'dedicated'
+        })
+      })
+    }
+
+    localAccounts.value.openai = openaiAccounts
 
     if (bedrockData.success) {
       localAccounts.value.bedrock = (bedrockData.data || []).map((account) => ({
@@ -989,7 +1017,7 @@ const loadUsers = async () => {
       availableUsers.value = response.data || []
     }
   } catch (error) {
-    console.error('Failed to load users:', error)
+    // console.error('Failed to load users:', error)
     availableUsers.value = [
       {
         id: 'admin',
@@ -1015,7 +1043,7 @@ onMounted(async () => {
     supportedClients.value = clients || []
     availableTags.value = tags || []
   } catch (error) {
-    console.error('Error loading initial data:', error)
+    // console.error('Error loading initial data:', error)
     // Fallback to empty arrays if loading fails
     supportedClients.value = []
     availableTags.value = []
@@ -1023,16 +1051,38 @@ onMounted(async () => {
 
   // 初始化账号数据
   if (props.accounts) {
+    // 合并 OpenAI 和 OpenAI-Responses 账号
+    const openaiAccounts = []
+    if (props.accounts.openai) {
+      props.accounts.openai.forEach((account) => {
+        openaiAccounts.push({
+          ...account,
+          platform: 'openai'
+        })
+      })
+    }
+    if (props.accounts.openaiResponses) {
+      props.accounts.openaiResponses.forEach((account) => {
+        openaiAccounts.push({
+          ...account,
+          platform: 'openai-responses'
+        })
+      })
+    }
+
     localAccounts.value = {
       claude: props.accounts.claude || [],
       gemini: props.accounts.gemini || [],
-      openai: props.accounts.openai || [],
+      openai: openaiAccounts,
       bedrock: props.accounts.bedrock || [], // 添加 Bedrock 账号
       claudeGroups: props.accounts.claudeGroups || [],
       geminiGroups: props.accounts.geminiGroups || [],
       openaiGroups: props.accounts.openaiGroups || []
     }
   }
+
+  // 自动加载账号数据
+  await refreshAccounts()
 
   form.name = props.apiKey.name
 
@@ -1043,7 +1093,7 @@ onMounted(async () => {
   // 如果有历史tokenLimit但没有rateLimitCost，提示用户需要重新设置
   if (props.apiKey.tokenLimit > 0 && !props.apiKey.rateLimitCost) {
     // 可以根据需要添加提示，或者自动迁移（这里选择让用户手动设置）
-    console.log('检测到历史Token限制，请考虑设置费用限制')
+    // console.log('检测到历史Token限制，请考虑设置费用限制')
   }
 
   form.rateLimitWindow = props.apiKey.rateLimitWindow || ''
@@ -1059,7 +1109,10 @@ onMounted(async () => {
     form.claudeAccountId = props.apiKey.claudeAccountId || ''
   }
   form.geminiAccountId = props.apiKey.geminiAccountId || ''
+
+  // 处理 OpenAI 账号 - 直接使用后端传来的值（已包含 responses: 前缀）
   form.openaiAccountId = props.apiKey.openaiAccountId || ''
+
   form.bedrockAccountId = props.apiKey.bedrockAccountId || '' // 添加 Bedrock 账号ID初始化
   form.restrictedModels = props.apiKey.restrictedModels || []
   form.allowedClients = props.apiKey.allowedClients || []

@@ -285,6 +285,20 @@ class ClaudeConsoleAccountService {
       }
       if (updates.schedulable !== undefined) {
         updatedData.schedulable = updates.schedulable.toString()
+        // 如果是手动修改调度状态，清除所有自动停止相关的字段
+        // 防止自动恢复
+        updatedData.rateLimitAutoStopped = ''
+        updatedData.quotaAutoStopped = ''
+        // 兼容旧的标记
+        updatedData.autoStoppedAt = ''
+        updatedData.stoppedReason = ''
+
+        // 记录日志
+        if (updates.schedulable === true || updates.schedulable === 'true') {
+          logger.info(`✅ Manually enabled scheduling for Claude Console account ${accountId}`)
+        } else {
+          logger.info(`⛔ Manually disabled scheduling for Claude Console account ${accountId}`)
+        }
       }
 
       // 额度管理相关字段
@@ -400,7 +414,10 @@ class ClaudeConsoleAccountService {
         rateLimitedAt: new Date().toISOString(),
         rateLimitStatus: 'limited',
         isActive: 'false', // 禁用账户
-        errorMessage: `Rate limited at ${new Date().toISOString()}`
+        schedulable: 'false', // 停止调度，与其他平台保持一致
+        errorMessage: `Rate limited at ${new Date().toISOString()}`,
+        // 使用独立的限流自动停止标记
+        rateLimitAutoStopped: 'true'
       }
 
       // 只有当前状态不是quota_exceeded时才设置为rate_limited
@@ -466,11 +483,24 @@ class ClaudeConsoleAccountService {
           logger.info(`⚠️ Rate limit removed but quota exceeded remains for account: ${accountId}`)
         } else {
           // 没有额度限制，完全恢复
-          await client.hset(accountKey, {
+          const accountData = await client.hgetall(accountKey)
+          const updateData = {
             isActive: 'true',
             status: 'active',
             errorMessage: ''
-          })
+          }
+
+          // 只恢复因限流而自动停止的账户
+          if (accountData.rateLimitAutoStopped === 'true' && accountData.schedulable === 'false') {
+            updateData.schedulable = 'true' // 恢复调度
+            // 删除限流自动停止标记
+            await client.hdel(accountKey, 'rateLimitAutoStopped')
+            logger.info(
+              `✅ Auto-resuming scheduling for Claude Console account ${accountId} after rate limit cleared`
+            )
+          }
+
+          await client.hset(accountKey, updateData)
           logger.success(`✅ Rate limit removed and account re-enabled: ${accountId}`)
         }
       } else {
@@ -993,7 +1023,10 @@ class ClaudeConsoleAccountService {
         const updates = {
           isActive: false,
           quotaStoppedAt: new Date().toISOString(),
-          errorMessage: `Daily quota exceeded: $${currentDailyCost.toFixed(2)} / $${dailyQuota.toFixed(2)}`
+          errorMessage: `Daily quota exceeded: $${currentDailyCost.toFixed(2)} / $${dailyQuota.toFixed(2)}`,
+          schedulable: false, // 停止调度
+          // 使用独立的额度超限自动停止标记
+          quotaAutoStopped: 'true'
         }
 
         // 只有当前状态是active时才改为quota_exceeded
@@ -1058,11 +1091,17 @@ class ClaudeConsoleAccountService {
         updates.errorMessage = ''
         updates.quotaStoppedAt = ''
 
+        // 只恢复因额度超限而自动停止的账户
+        if (accountData.quotaAutoStopped === 'true') {
+          updates.schedulable = true
+          updates.quotaAutoStopped = ''
+        }
+
         // 如果是rate_limited状态，也清除限流相关字段
         if (accountData.status === 'rate_limited') {
           const client = redis.getClientSafe()
           const accountKey = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
-          await client.hdel(accountKey, 'rateLimitedAt', 'rateLimitStatus')
+          await client.hdel(accountKey, 'rateLimitedAt', 'rateLimitStatus', 'rateLimitAutoStopped')
         }
 
         logger.info(
@@ -1129,6 +1168,66 @@ class ClaudeConsoleAccountService {
     } catch (error) {
       logger.error('Failed to get account usage stats:', error)
       return null
+    }
+  }
+
+  // 🔄 重置账户所有异常状态
+  async resetAccountStatus(accountId) {
+    try {
+      const accountData = await this.getAccount(accountId)
+      if (!accountData) {
+        throw new Error('Account not found')
+      }
+
+      const client = redis.getClientSafe()
+      const accountKey = `${this.ACCOUNT_KEY_PREFIX}${accountId}`
+
+      // 准备要更新的字段
+      const updates = {
+        status: 'active',
+        errorMessage: '',
+        schedulable: 'true',
+        isActive: 'true' // 重要：必须恢复isActive状态
+      }
+
+      // 删除所有异常状态相关的字段
+      const fieldsToDelete = [
+        'rateLimitedAt',
+        'rateLimitStatus',
+        'unauthorizedAt',
+        'unauthorizedCount',
+        'overloadedAt',
+        'overloadStatus',
+        'blockedAt',
+        'quotaStoppedAt'
+      ]
+
+      // 执行更新
+      await client.hset(accountKey, updates)
+      await client.hdel(accountKey, ...fieldsToDelete)
+
+      logger.success(`✅ Reset all error status for Claude Console account ${accountId}`)
+
+      // 发送 Webhook 通知
+      try {
+        const webhookNotifier = require('../utils/webhookNotifier')
+        await webhookNotifier.sendAccountAnomalyNotification({
+          accountId,
+          accountName: accountData.name || accountId,
+          platform: 'claude-console',
+          status: 'recovered',
+          errorCode: 'STATUS_RESET',
+          reason: 'Account status manually reset',
+          timestamp: new Date().toISOString()
+        })
+      } catch (webhookError) {
+        logger.warn('Failed to send webhook notification:', webhookError)
+      }
+
+      return { success: true, accountId }
+    } catch (error) {
+      logger.error(`❌ Failed to reset Claude Console account status: ${accountId}`, error)
+      throw error
     }
   }
 }

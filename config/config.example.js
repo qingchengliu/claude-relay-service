@@ -32,13 +32,28 @@ const config = {
     enableTLS: process.env.REDIS_ENABLE_TLS === 'true'
   },
 
+  // 🔗 会话管理配置
+  session: {
+    // 粘性会话TTL配置（小时），默认1小时
+    stickyTtlHours: parseFloat(process.env.STICKY_SESSION_TTL_HOURS) || 1,
+    // 续期阈值（分钟），默认0分钟（不续期）
+    renewalThresholdMinutes: parseInt(process.env.STICKY_SESSION_RENEWAL_THRESHOLD_MINUTES) || 0
+  },
+
   // 🎯 Claude API配置
   claude: {
     apiUrl: process.env.CLAUDE_API_URL || 'https://api.anthropic.com/v1/messages',
     apiVersion: process.env.CLAUDE_API_VERSION || '2023-06-01',
     betaHeader:
       process.env.CLAUDE_BETA_HEADER ||
-      'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14'
+      'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14',
+    overloadHandling: {
+      enabled: (() => {
+        const minutes = parseInt(process.env.CLAUDE_OVERLOAD_HANDLING_MINUTES) || 0
+        // 验证配置值：限制在0-1440分钟(24小时)内
+        return Math.max(0, Math.min(minutes, 1440))
+      })()
+    }
   },
 
   // ☁️ Bedrock API配置
@@ -56,11 +71,14 @@ const config = {
 
   // 🌐 代理配置
   proxy: {
-    timeout: parseInt(process.env.DEFAULT_PROXY_TIMEOUT) || 30000,
+    timeout: parseInt(process.env.DEFAULT_PROXY_TIMEOUT) || 600000, // 10分钟
     maxRetries: parseInt(process.env.MAX_PROXY_RETRIES) || 3,
     // IP协议族配置：true=IPv4, false=IPv6, 默认IPv4（兼容性更好）
     useIPv4: process.env.PROXY_USE_IPV4 !== 'false' // 默认 true，只有明确设置为 'false' 才使用 IPv6
   },
+
+  // ⏱️ 请求超时配置
+  requestTimeout: parseInt(process.env.REQUEST_TIMEOUT) || 600000, // 默认 10 分钟
 
   // 📈 使用限制
   limits: {
