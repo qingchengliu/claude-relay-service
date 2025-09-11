@@ -191,6 +191,15 @@ class ClaudeConsoleRelayService {
       } else if (response.status === 529) {
         logger.warn(`🚫 Overload error detected for Claude Console account ${accountId}`)
         await claudeConsoleAccountService.markAccountOverloaded(accountId)
+      } else if (response.status === 500) {
+        // 检查响应内容是否包含"限流"关键词
+        const responseText =
+          typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+
+        if (responseText && responseText.includes('限流')) {
+          logger.warn(`🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`)
+          await claudeConsoleAccountService.markAccountRateLimited(accountId)
+        }
       } else if (response.status === 200 || response.status === 201) {
         // 如果请求成功，检查并移除错误状态
         const isRateLimited = await claudeConsoleAccountService.isAccountRateLimited(accountId)
@@ -398,6 +407,44 @@ class ClaudeConsoleRelayService {
               })
             } else if (response.status === 529) {
               claudeConsoleAccountService.markAccountOverloaded(accountId)
+            } else if (response.status === 500) {
+              // 对于500错误，收集流数据来检查是否包含"限流"
+              // 设置错误响应的状态码和响应头
+              if (!responseStream.headersSent) {
+                const errorHeaders = {
+                  'Content-Type': response.headers['content-type'] || 'application/json',
+                  'Cache-Control': 'no-cache',
+                  Connection: 'keep-alive'
+                }
+                // 避免 Transfer-Encoding 冲突，让 Express 自动处理
+                delete errorHeaders['Transfer-Encoding']
+                delete errorHeaders['Content-Length']
+                responseStream.writeHead(response.status, errorHeaders)
+              }
+
+              response.data.on('data', (chunk) => {
+                const chunkStr = chunk.toString()
+                // 检查当前chunk是否包含"限流"（因为通常在同一个chunk中）
+                if (chunkStr.includes('限流')) {
+                  logger.warn(
+                    `🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`
+                  )
+                  claudeConsoleAccountService.markAccountRateLimited(accountId)
+                }
+
+                // 继续透传给客户端
+                if (!responseStream.destroyed) {
+                  responseStream.write(chunk)
+                }
+              })
+
+              response.data.on('end', () => {
+                if (!responseStream.destroyed) {
+                  responseStream.end()
+                }
+                resolve()
+              })
+              return
             }
 
             // 设置错误响应的状态码和响应头
@@ -682,6 +729,20 @@ class ClaudeConsoleRelayService {
               })
             } else if (error.response.status === 529) {
               claudeConsoleAccountService.markAccountOverloaded(accountId)
+            } else if (error.response.status === 500) {
+              // 对于axios捕获的500错误，检查错误内容
+              const errorText = error.response.data
+                ? typeof error.response.data === 'string'
+                  ? error.response.data
+                  : JSON.stringify(error.response.data)
+                : ''
+
+              if (errorText.includes('限流')) {
+                logger.warn(
+                  `🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`
+                )
+                claudeConsoleAccountService.markAccountRateLimited(accountId)
+              }
             }
           }
 
