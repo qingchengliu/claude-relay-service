@@ -36,6 +36,7 @@ const {
   requestSizeLimit
 } = require('./middleware/auth')
 const { browserFallbackMiddleware } = require('./middleware/browserFallback')
+const { claudeCliVersionCheck } = require('./middleware/claudeCliVersionCheck')
 
 class Application {
   constructor() {
@@ -118,6 +119,9 @@ class Application {
 
       // 🆕 兜底中间件：处理Chrome插件兼容性（必须在认证之前）
       this.app.use(browserFallbackMiddleware)
+
+      // 🧩 拦截低版本 Claude Code CLI（基于 UA 的版本校验）
+      this.app.use(claudeCliVersionCheck)
 
       // 📦 压缩 - 排除流式响应（SSE）
       this.app.use(
