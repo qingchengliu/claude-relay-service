@@ -56,6 +56,19 @@ const config = {
     }
   },
 
+  // 🖥️ Claude Console Relay 全局配置（统一客户端标识）
+  // 注意：这是对所有 ClaudeConsoleRelay 账户的全局开关，不提供账号级覆盖
+  claudeConsole: {
+    // 是否启用统一客户端标识（影响 metadata.user_id 的客户端段）
+    // 默认关闭。开启：CLAUDE_CONSOLE_USE_UNIFIED_CLIENT_ID=true
+    useUnifiedClientId: process.env.CLAUDE_CONSOLE_USE_UNIFIED_CLIENT_ID === 'true' || false,
+    // 统一客户端标识，建议使用 64 位小写十六进制字符串以匹配现有格式规则
+    // 示例（生成64位hex）：
+    //   - OpenSSL:  openssl rand -hex 32
+    //   - Node.js:  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+    unifiedClientId: process.env.CLAUDE_CONSOLE_UNIFIED_CLIENT_ID || ''
+  },
+
   // ☁️ Bedrock API配置
   bedrock: {
     enabled: process.env.CLAUDE_CODE_USE_BEDROCK === '1',

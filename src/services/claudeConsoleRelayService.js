@@ -59,6 +59,24 @@ class ClaudeConsoleRelayService {
         model: mappedModel
       }
 
+      // 处理统一的客户端标识（全局开关）
+      if (
+        config.claudeConsole &&
+        config.claudeConsole.useUnifiedClientId &&
+        config.claudeConsole.unifiedClientId
+      ) {
+        const uid = modifiedRequestBody?.metadata?.user_id
+        if (uid) {
+          const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
+          if (m && m[1]) {
+            modifiedRequestBody.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+            logger.info(
+              `🔄 Replaced client ID with unified ID: ${modifiedRequestBody.metadata.user_id}`
+            )
+          }
+        }
+      }
+
       // 模型兼容性检查已经在调度器中完成，这里不需要再检查
 
       // 创建代理agent
@@ -333,6 +351,22 @@ class ClaudeConsoleRelayService {
   ) {
     return new Promise((resolve, reject) => {
       let aborted = false
+
+      // 处理统一的客户端标识（全局开关，流式）
+      if (
+        config.claudeConsole &&
+        config.claudeConsole.useUnifiedClientId &&
+        config.claudeConsole.unifiedClientId
+      ) {
+        const uid = body?.metadata?.user_id
+        if (uid) {
+          const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
+          if (m && m[1]) {
+            body.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+            logger.info(`🔄 Replaced client ID with unified ID: ${body.metadata.user_id}`)
+          }
+        }
+      }
 
       // 构建完整的API URL
       const cleanUrl = account.apiUrl.replace(/\/$/, '') // 移除末尾斜杠
