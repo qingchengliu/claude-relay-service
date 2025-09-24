@@ -2,10 +2,86 @@ const axios = require('axios')
 const claudeConsoleAccountService = require('./claudeConsoleAccountService')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
+const redis = require('../models/redis')
 
 class ClaudeConsoleRelayService {
   constructor() {
     this.defaultUserAgent = 'claude-cli/1.0.69 (external, cli)'
+  }
+
+  // 统一 UA：捕获并返回统一的 Claude Code User-Agent（按日缓存）
+  async captureAndGetUnifiedUserAgent(clientHeaders) {
+    if (!config?.claudeConsole?.useUnifiedUserAgent) {
+      return null
+    }
+
+    const CACHE_KEY = 'claude_console_user_agent:daily'
+    const TTL = 90000 // 25小时
+    const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+    const isCliUA = clientUA && /^claude-cli\/[\d.]+\s+\(/i.test(clientUA)
+
+    let cachedUA = await redis.client.get(CACHE_KEY)
+
+    if (isCliUA) {
+      if (!cachedUA) {
+        await redis.client.setex(CACHE_KEY, TTL, clientUA)
+        cachedUA = clientUA
+        logger.info(`Captured unified Console UA: ${clientUA}`)
+      } else {
+        const newVer = this._extractClaudeCliVersion(clientUA)
+        const oldVer = this._extractClaudeCliVersion(cachedUA)
+        if (!newVer || !oldVer || this._compareSemanticVersions(newVer, oldVer) > 0) {
+          await redis.client.setex(CACHE_KEY, TTL, clientUA)
+          logger.info(`Updated Console unified UA: ${clientUA} (was: ${cachedUA})`)
+          cachedUA = clientUA
+        } else {
+          await redis.client.expire(CACHE_KEY, TTL)
+        }
+      }
+    }
+
+    return cachedUA || null
+  }
+
+  _extractClaudeCliVersion(ua) {
+    if (!ua) {
+      return null
+    }
+    const m = ua.match(/claude-cli\/([\d.]+(?:[a-zA-Z0-9-]*)?)/i)
+    return m ? m[1] : null
+  }
+
+  _compareSemanticVersions(v1, v2) {
+    if (!v1 || !v2) {
+      return 0
+    }
+    const a = v1.split('.').map((x) => parseInt(x, 10) || 0)
+    const b = v2.split('.').map((x) => parseInt(x, 10) || 0)
+    const n = Math.max(a.length, b.length)
+    for (let i = 0; i < n; i++) {
+      const d = (a[i] || 0) - (b[i] || 0)
+      if (d !== 0) {
+        return d > 0 ? 1 : -1
+      }
+    }
+    return 0
+  }
+
+  async _selectUserAgent(clientHeaders, account) {
+    if (config?.claudeConsole?.useUnifiedUserAgent) {
+      const unifiedUA = await this.captureAndGetUnifiedUserAgent(clientHeaders)
+      const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+      // 按评审建议：当未捕获到统一UA时，优先使用账号UA，再退回客户端UA，避免打破Console指纹
+      const selectedUA = unifiedUA || account.userAgent || clientUA || this.defaultUserAgent
+      logger.debug(`Selected Console UA: ${selectedUA}`)
+      return selectedUA
+    }
+    return (
+      account.userAgent ||
+      clientHeaders?.['user-agent'] ||
+      clientHeaders?.['User-Agent'] ||
+      this.defaultUserAgent
+    )
   }
 
   // 🚀 转发请求到Claude Console API
@@ -122,13 +198,8 @@ class ClaudeConsoleRelayService {
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
       logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
 
-      // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
-      const userAgent =
-        account.userAgent ||
-        clientHeaders?.['user-agent'] ||
-        clientHeaders?.['User-Agent'] ||
-        this.defaultUserAgent
-
+      // 统一 UA：优先使用捕获 UA；否则用客户端 UA；再回退账户 UA/默认 UA
+      const userAgent = await this._selectUserAgent(clientHeaders, account)
       // 准备请求配置
       const requestConfig = {
         method: 'POST',
@@ -349,6 +420,7 @@ class ClaudeConsoleRelayService {
     streamTransformer = null,
     requestOptions = {}
   ) {
+    const userAgent = await this._selectUserAgent(clientHeaders, account)
     return new Promise((resolve, reject) => {
       let aborted = false
 
@@ -378,12 +450,8 @@ class ClaudeConsoleRelayService {
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
       logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
 
-      // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
-      const userAgent =
-        account.userAgent ||
-        clientHeaders?.['user-agent'] ||
-        clientHeaders?.['User-Agent'] ||
-        this.defaultUserAgent
+      // 统一 UA：优先使用捕获 UA；否则用客户端 UA；再回退账户 UA/默认 UA
+      // userAgent 已在 Promise 外部获取
 
       // 准备请求配置
       const requestConfig = {

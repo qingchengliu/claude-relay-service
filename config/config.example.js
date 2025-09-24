@@ -66,7 +66,11 @@ const config = {
     // 示例（生成64位hex）：
     //   - OpenSSL:  openssl rand -hex 32
     //   - Node.js:  node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
-    unifiedClientId: process.env.CLAUDE_CONSOLE_UNIFIED_CLIENT_ID || ''
+    unifiedClientId: process.env.CLAUDE_CONSOLE_UNIFIED_CLIENT_ID || '',
+    // 是否启用“统一 Claude Code 版本”（统一 User-Agent）。
+    // 按日捕获最新的 CLI User-Agent；若未捕获则直接使用客户端 UA 作为回退。
+    // 开启：CLAUDE_CONSOLE_USE_UNIFIED_USER_AGENT=true
+    useUnifiedUserAgent: process.env.CLAUDE_CONSOLE_USE_UNIFIED_USER_AGENT === 'true' || false
   },
 
   // ☁️ Bedrock API配置
