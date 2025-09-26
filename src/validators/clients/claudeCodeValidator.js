@@ -1,5 +1,12 @@
 const logger = require('../../utils/logger')
 const { CLIENT_DEFINITIONS } = require('../clientDefinitions')
+const {
+  haikuSystemPrompt,
+  claudeOtherSystemPrompt1,
+  claudeOtherSystemPrompt2,
+  claudeOtherSystemPromptCompact
+} = require('../../utils/contents')
+const { simple: similaritySimple } = require('../../utils/text-similarity')
 
 /**
  * Claude Code CLI 验证器
@@ -35,6 +42,53 @@ class ClaudeCodeValidator {
   }
 
   /**
+   * 检查请求是否包含 Claude Code 系统提示词
+   * @param {Object} body - 请求体
+   * @returns {boolean} 是否包含 Claude Code 系统提示词
+   */
+  static hasClaudeCodeSystemPrompt(body) {
+    if (!body || typeof body !== 'object') {
+      return false
+    }
+
+    const model = typeof body.model === 'string' ? body.model : null
+    if (!model) {
+      return false
+    }
+
+    if (model.startsWith('claude-3-5-haiku')) {
+      return true
+    }
+
+    const systemEntries = Array.isArray(body.system) ? body.system : []
+    const system0Text =
+      systemEntries.length > 0 && typeof systemEntries[0]?.text === 'string'
+        ? systemEntries[0].text
+        : null
+    const system1Text =
+      systemEntries.length > 1 && typeof systemEntries[1]?.text === 'string'
+        ? systemEntries[1].text
+        : null
+
+    if (!system0Text || !system1Text) {
+      return false
+    }
+
+    const sys0 = similaritySimple(system0Text, claudeOtherSystemPrompt1, 0.9)
+    if (!sys0.passed) {
+      return false
+    }
+
+    const sys1 = similaritySimple(system1Text, claudeOtherSystemPrompt2, 0.5)
+    const sysCompact = similaritySimple(system1Text, claudeOtherSystemPromptCompact, 0.9)
+    if (!sys1.passed && !sysCompact.passed) {
+      return false
+    }
+
+    return true
+  }
+
+  /**
    * 验证请求是否来自 Claude Code CLI
    * @param {Object} req - Express 请求对象
    * @returns {boolean} 验证结果
@@ -45,8 +99,10 @@ class ClaudeCodeValidator {
       const path = req.path || ''
 
       // 1. 先检查是否是 Claude Code 的 User-Agent
-      // 格式: claude-cli/1.0.86 (external, cli)
-      const claudeCodePattern = /^claude-cli\/[\d\.]+([-\w]*)?\s+\(external,\s*cli\)$/i
+      // 格式: claude-cli/1.0.86 (external, cli) sdk-cli sdk-py
+
+      const claudeCodePattern = /^claude-cli\/[\d.]+(?:[-\w]*)?\s+\(external,\s*(?:cli|sdk-[a-z]+)\)$/i
+
       if (!claudeCodePattern.test(userAgent)) {
         // 不是 Claude Code 的请求，此验证器不处理
         return false
@@ -59,7 +115,13 @@ class ClaudeCodeValidator {
         return true
       }
 
-      // 3. 检查必需的头部（值不为空即可）
+      // 3. 检查系统提示词是否为 Claude Code 的系统提示词
+      if (!this.hasClaudeCodeSystemPrompt(req.body)) {
+        logger.debug('Claude Code validation failed - missing or invalid Claude Code system prompt')
+        return false
+      }
+
+      // 4. 检查必需的头部（值不为空即可）
       const xApp = req.headers['x-app']
       const anthropicBeta = req.headers['anthropic-beta']
       const anthropicVersion = req.headers['anthropic-version']
@@ -79,9 +141,11 @@ class ClaudeCodeValidator {
         return false
       }
 
-      logger.debug(`Claude Code headers - x-app: ${xApp}, anthropic-beta: ${anthropicBeta}, anthropic-version: ${anthropicVersion}`)
+      logger.debug(
+        `Claude Code headers - x-app: ${xApp}, anthropic-beta: ${anthropicBeta}, anthropic-version: ${anthropicVersion}`
+      )
 
-      // 4. 验证 body 中的 metadata.user_id
+      // 5. 验证 body 中的 metadata.user_id
       if (!req.body || !req.body.metadata || !req.body.metadata.user_id) {
         logger.debug('Claude Code validation failed - missing metadata.user_id in body')
         return false
@@ -111,12 +175,11 @@ class ClaudeCodeValidator {
         return false
       }
 
-      // 5. 额外日志记录（用于调试）
+      // 6. 额外日志记录（用于调试）
       logger.debug(`Claude Code validation passed - UA: ${userAgent}, userId: ${userId}`)
 
       // 所有必要检查通过
       return true
-
     } catch (error) {
       logger.error('Error in ClaudeCodeValidator:', error)
       // 验证出错时默认拒绝
