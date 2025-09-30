@@ -52,7 +52,7 @@ function claudeCliVersionCheck(req, res, next) {
       return next()
     }
 
-    const minVersion = (config.claudeCli && config.claudeCli.minVersion) || '1.0.120'
+    const minVersion = (config.claudeCli && config.claudeCli.minVersion) || '2.0.0'
     const current = extractClaudeCliVersion(ua)
 
     if (!current) {
@@ -65,7 +65,9 @@ function claudeCliVersionCheck(req, res, next) {
       logger.security(
         `🚫 拒绝低版本 Claude CLI 请求: 当前 ${current} < 最低 ${minVersion} | ${req.method} ${req.originalUrl}`
       )
-      return res.status(500).json({ error: '请在terminal运行claude update命令进行升级' })
+      return res.status(500).json({
+        error: `请在terminal运行claude update命令进行升级,当前 ${current} < 最低 ${minVersion}`
+      })
     }
 
     return next()
