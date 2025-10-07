@@ -534,9 +534,6 @@ const handleResponses = async (req, res) => {
     let usageReported = false
     let rateLimitDetected = false
     let rateLimitResetsInSeconds = null
-    const collectedOutputItems = []
-    let latestResponseSnapshot = null
-    let modelUsedForStats = null
 
     if (!isStream) {
       // 非流式响应处理
@@ -573,19 +570,6 @@ const handleResponses = async (req, res) => {
           logger.info(
             `📊 Recorded OpenAI non-stream usage - Input: ${totalInputTokens}(actual:${actualInputTokens}+cached:${cacheReadTokens}), Output: ${outputTokens}, Total: ${usageData.total_tokens || totalInputTokens + outputTokens}, Model: ${actualModel}`
           )
-
-          if (global.pluginHooks?.afterUsageRecord) {
-            try {
-              await global.pluginHooks.afterUsageRecord(
-                apiKeyData.id,
-                usageData,
-                actualModel,
-                responseData
-              )
-            } catch (hookError) {
-              logger.error('📊 Failed to run OpenAI non-stream statistics hook:', hookError)
-            }
-          }
         }
 
         // 返回响应
@@ -615,14 +599,9 @@ const handleResponses = async (req, res) => {
             const jsonStr = line.slice(6) // 移除 'data: ' 前缀
             const eventData = JSON.parse(jsonStr)
 
-            if (eventData.type === 'response.output_item.done' && eventData.item) {
-              collectedOutputItems.push(eventData.item)
-            }
-
             // 检查是否是 response.completed 事件
             if (eventData.type === 'response.completed' && eventData.response) {
               // 从响应中获取真实的 model
-              latestResponseSnapshot = eventData.response
               if (eventData.response.model) {
                 actualModel = eventData.response.model
                 logger.debug(`📊 Captured actual model: ${actualModel}`)
@@ -697,7 +676,6 @@ const handleResponses = async (req, res) => {
 
           // 使用响应中的真实 model，如果没有则使用请求中的 model，最后回退到默认值
           const modelToRecord = actualModel || requestedModel || 'gpt-4'
-          modelUsedForStats = modelToRecord
 
           await apiKeyService.recordUsage(
             apiKeyData.id,
@@ -715,33 +693,6 @@ const handleResponses = async (req, res) => {
           usageReported = true
         } catch (error) {
           logger.error('Failed to record OpenAI usage:', error)
-        }
-      }
-
-      if (usageData && global.pluginHooks?.afterUsageRecord) {
-        const modelForHook = modelUsedForStats || actualModel || requestedModel || 'gpt-4'
-        const responseForStats = (() => {
-          if (latestResponseSnapshot) {
-            return {
-              ...latestResponseSnapshot,
-              items: collectedOutputItems
-            }
-          }
-          if (collectedOutputItems.length > 0) {
-            return { items: collectedOutputItems }
-          }
-          return null
-        })()
-
-        try {
-          await global.pluginHooks.afterUsageRecord(
-            apiKeyData.id,
-            usageData,
-            modelForHook,
-            responseForStats
-          )
-        } catch (hookError) {
-          logger.error('📊 Failed to run OpenAI stream statistics hook:', hookError)
         }
       }
 

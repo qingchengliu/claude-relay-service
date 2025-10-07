@@ -425,63 +425,100 @@ class OpenAIResponsesRelayService {
     // 解析 SSE 事件以捕获 usage 数据和 model
     const parseSSEForUsage = (data) => {
       const lines = data.split('\n')
+      let collectingJson = false
+      let currentJsonParts = []
 
-      for (const line of lines) {
-        if (line.startsWith('data: ')) {
-          try {
-            const jsonStr = line.slice(6)
-            if (jsonStr === '[DONE]') {
-              continue
-            }
-
-            const eventData = JSON.parse(jsonStr)
-
-            if (eventData.type === 'response.output_item.done' && eventData.item) {
-              collectedOutputItems.push(eventData.item)
-            }
-
-            // 检查是否是 response.completed 事件（OpenAI-Responses 格式）
-            if (eventData.type === 'response.completed' && eventData.response) {
-              latestResponseSnapshot = eventData.response
-              // 从响应中获取真实的 model
-              if (eventData.response.model) {
-                actualModel = eventData.response.model
-                logger.debug(`📊 Captured actual model from response.completed: ${actualModel}`)
-              }
-
-              // 获取 usage 数据 - OpenAI-Responses 格式在 response.usage 下
-              if (eventData.response.usage) {
-                usageData = eventData.response.usage
-                logger.info('📊 Successfully captured usage data from OpenAI-Responses:', {
-                  input_tokens: usageData.input_tokens,
-                  output_tokens: usageData.output_tokens,
-                  total_tokens: usageData.total_tokens
-                })
-              }
-            }
-
-            // 检查是否有限流错误
-            if (eventData.error) {
-              // 检查多种可能的限流错误类型
-              if (
-                eventData.error.type === 'rate_limit_error' ||
-                eventData.error.type === 'usage_limit_reached' ||
-                eventData.error.type === 'rate_limit_exceeded'
-              ) {
-                rateLimitDetected = true
-                if (eventData.error.resets_in_seconds) {
-                  rateLimitResetsInSeconds = eventData.error.resets_in_seconds
-                  logger.warn(
-                    `🚫 Rate limit detected in stream, resets in ${rateLimitResetsInSeconds} seconds (${Math.ceil(rateLimitResetsInSeconds / 60)} minutes)`
-                  )
-                }
-              }
-            }
-          } catch (e) {
-            // 忽略解析错误
-          }
+      const flushCurrentJson = () => {
+        if (currentJsonParts.length === 0) {
+          return
         }
+
+        const jsonStr = currentJsonParts.join('')
+        currentJsonParts = []
+
+        if (!jsonStr.trim() || jsonStr.trim() === '[DONE]') {
+          return
+        }
+
+        try {
+          const eventData = JSON.parse(jsonStr)
+
+          if (eventData.type === 'response.output_item.done' && eventData.item) {
+            collectedOutputItems.push(eventData.item)
+          }
+
+          // 检查是否是 response.completed 事件（OpenAI-Responses 格式）
+          if (eventData.type === 'response.completed' && eventData.response) {
+            latestResponseSnapshot = eventData.response
+            // 从响应中获取真实的 model
+            if (eventData.response.model) {
+              actualModel = eventData.response.model
+              logger.debug(`📊 Captured actual model from response.completed: ${actualModel}`)
+            }
+
+            // 获取 usage 数据 - OpenAI-Responses 格式在 response.usage 下
+            if (eventData.response.usage) {
+              usageData = eventData.response.usage
+              logger.info('📊 Successfully captured usage data from OpenAI-Responses:', {
+                input_tokens: usageData.input_tokens,
+                output_tokens: usageData.output_tokens,
+                total_tokens: usageData.total_tokens
+              })
+            }
+          }
+
+          // 检查是否有限流错误
+          if (eventData.error) {
+            // 检查多种可能的限流错误类型
+            if (
+              eventData.error.type === 'rate_limit_error' ||
+              eventData.error.type === 'usage_limit_reached' ||
+              eventData.error.type === 'rate_limit_exceeded'
+            ) {
+              rateLimitDetected = true
+              if (eventData.error.resets_in_seconds) {
+                rateLimitResetsInSeconds = eventData.error.resets_in_seconds
+                logger.warn(
+                  `🚫 Rate limit detected in stream, resets in ${rateLimitResetsInSeconds} seconds (${Math.ceil(rateLimitResetsInSeconds / 60)} minutes)`
+                )
+              }
+            }
+          }
+        } catch (e) {
+          logger.warn('Failed to parse SSE JSON chunk', { error: e.message })
+        }
+        collectingJson = false
       }
+
+      for (const rawLine of lines) {
+        const line = rawLine.trimStart()
+
+        if (line.startsWith('data:')) {
+          flushCurrentJson()
+          const payload = line.slice(5)
+          if (!payload) {
+            collectingJson = true
+            continue
+          }
+
+          currentJsonParts.push(payload)
+          collectingJson = true
+          continue
+        }
+
+        if (!collectingJson) {
+          continue
+        }
+
+        if (!line.length) {
+          flushCurrentJson()
+          continue
+        }
+
+        currentJsonParts.push(rawLine)
+      }
+
+      flushCurrentJson()
     }
 
     // 监听数据流
@@ -576,27 +613,37 @@ class OpenAIResponsesRelayService {
         }
       }
 
-      if (usageData && global.pluginHooks?.afterUsageRecord) {
+      // 🔧 放宽 Hook 条件：即使没有 usage 数据，只要有工具调用也触发统计
+      if (global.pluginHooks?.afterUsageRecord) {
         const modelForHook = modelUsedForStats || actualModel || requestedModel || 'gpt-4'
         const responseForStats = (() => {
           if (latestResponseSnapshot) {
-            return { ...latestResponseSnapshot, items: collectedOutputItems }
+            return { ...latestResponseSnapshot, content: collectedOutputItems }
           }
           if (collectedOutputItems.length > 0) {
-            return { items: collectedOutputItems }
+            return { content: collectedOutputItems }
           }
           return null
         })()
 
-        try {
-          await global.pluginHooks.afterUsageRecord(
-            apiKeyData.id,
-            usageData,
-            modelForHook,
-            responseForStats
-          )
-        } catch (hookError) {
-          logger.error('📊 Failed to run OpenAI-Responses stream statistics hook:', hookError)
+        // 只要有响应数据（工具调用）就触发钩子，usageData 可以为 null
+        if (responseForStats || usageData) {
+          try {
+            logger.info('📊 Triggering afterUsageRecord hook', {
+              hasUsage: !!usageData,
+              hasResponse: !!responseForStats,
+              itemsCount: collectedOutputItems.length
+            })
+
+            await global.pluginHooks.afterUsageRecord(
+              apiKeyData.id,
+              usageData || {}, // 传入空对象而不是 null
+              modelForHook,
+              responseForStats
+            )
+          } catch (hookError) {
+            logger.error('📊 Failed to run OpenAI-Responses stream statistics hook:', hookError)
+          }
         }
       }
 
@@ -705,19 +752,6 @@ class OpenAIResponsesRelayService {
           `📊 Recorded non-stream usage - Input: ${totalInputTokens}(actual:${actualInputTokens}+cached:${cacheReadTokens}), CacheCreate: ${cacheCreateTokens}, Output: ${outputTokens}, Total: ${totalTokens}, Model: ${actualModel}`
         )
 
-        if (global.pluginHooks?.afterUsageRecord) {
-          try {
-            await global.pluginHooks.afterUsageRecord(
-              apiKeyData.id,
-              usageData,
-              actualModel,
-              responseData
-            )
-          } catch (hookError) {
-            logger.error('📊 Failed to run OpenAI-Responses non-stream statistics hook:', hookError)
-          }
-        }
-
         // 更新账户的 token 使用统计
         await openaiResponsesAccountService.updateAccountUsage(account.id, totalTokens)
 
@@ -738,6 +772,25 @@ class OpenAIResponsesRelayService {
         }
       } catch (error) {
         logger.error('Failed to record usage:', error)
+      }
+    }
+
+    // 🔧 放宽 Hook 条件：即使没有 usage 数据，只要有响应也触发统计钩子
+    if (global.pluginHooks?.afterUsageRecord && responseData) {
+      try {
+        logger.info('📊 Triggering afterUsageRecord hook (non-stream)', {
+          hasUsage: !!usageData,
+          hasResponseData: !!responseData
+        })
+
+        await global.pluginHooks.afterUsageRecord(
+          apiKeyData.id,
+          usageData || {}, // 传入空对象而不是 null
+          actualModel,
+          responseData
+        )
+      } catch (hookError) {
+        logger.error('📊 Failed to run OpenAI-Responses non-stream statistics hook:', hookError)
       }
     }
 
