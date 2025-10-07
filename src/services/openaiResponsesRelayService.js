@@ -418,6 +418,9 @@ class OpenAIResponsesRelayService {
     let rateLimitDetected = false
     let rateLimitResetsInSeconds = null
     let streamEnded = false
+    const collectedOutputItems = []
+    let latestResponseSnapshot = null
+    let modelUsedForStats = null
 
     // 解析 SSE 事件以捕获 usage 数据和 model
     const parseSSEForUsage = (data) => {
@@ -433,8 +436,13 @@ class OpenAIResponsesRelayService {
 
             const eventData = JSON.parse(jsonStr)
 
+            if (eventData.type === 'response.output_item.done' && eventData.item) {
+              collectedOutputItems.push(eventData.item)
+            }
+
             // 检查是否是 response.completed 事件（OpenAI-Responses 格式）
             if (eventData.type === 'response.completed' && eventData.response) {
+              latestResponseSnapshot = eventData.response
               // 从响应中获取真实的 model
               if (eventData.response.model) {
                 actualModel = eventData.response.model
@@ -529,6 +537,7 @@ class OpenAIResponsesRelayService {
           const totalTokens =
             usageData.total_tokens || totalInputTokens + outputTokens + cacheCreateTokens
           const modelToRecord = actualModel || requestedModel || 'gpt-4'
+          modelUsedForStats = modelToRecord
 
           await apiKeyService.recordUsage(
             apiKeyData.id,
@@ -564,6 +573,30 @@ class OpenAIResponsesRelayService {
           }
         } catch (error) {
           logger.error('Failed to record usage:', error)
+        }
+      }
+
+      if (usageData && global.pluginHooks?.afterUsageRecord) {
+        const modelForHook = modelUsedForStats || actualModel || requestedModel || 'gpt-4'
+        const responseForStats = (() => {
+          if (latestResponseSnapshot) {
+            return { ...latestResponseSnapshot, items: collectedOutputItems }
+          }
+          if (collectedOutputItems.length > 0) {
+            return { items: collectedOutputItems }
+          }
+          return null
+        })()
+
+        try {
+          await global.pluginHooks.afterUsageRecord(
+            apiKeyData.id,
+            usageData,
+            modelForHook,
+            responseForStats
+          )
+        } catch (hookError) {
+          logger.error('📊 Failed to run OpenAI-Responses stream statistics hook:', hookError)
         }
       }
 
@@ -671,6 +704,19 @@ class OpenAIResponsesRelayService {
         logger.info(
           `📊 Recorded non-stream usage - Input: ${totalInputTokens}(actual:${actualInputTokens}+cached:${cacheReadTokens}), CacheCreate: ${cacheCreateTokens}, Output: ${outputTokens}, Total: ${totalTokens}, Model: ${actualModel}`
         )
+
+        if (global.pluginHooks?.afterUsageRecord) {
+          try {
+            await global.pluginHooks.afterUsageRecord(
+              apiKeyData.id,
+              usageData,
+              actualModel,
+              responseData
+            )
+          } catch (hookError) {
+            logger.error('📊 Failed to run OpenAI-Responses non-stream statistics hook:', hookError)
+          }
+        }
 
         // 更新账户的 token 使用统计
         await openaiResponsesAccountService.updateAccountUsage(account.id, totalTokens)

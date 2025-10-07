@@ -16,64 +16,65 @@ function extractEditStatistics(response) {
     toolUsage: {} // 新增：工具调用统计
   }
 
-  if (!response?.content || !Array.isArray(response.content)) {
-    logger.warn('📊 [Stats Extract] Invalid response structure', {
+  const normalizedItems = normalizeResponseItems(response)
+
+  if (normalizedItems.length === 0) {
+    logger.debug('📊 [Stats Extract] No tool usage items found in response', {
       hasResponse: !!response,
-      hasContent: !!response?.content,
-      contentType: typeof response?.content
+      hasContentArray: Array.isArray(response?.content),
+      hasOutputArray: Array.isArray(response?.output),
+      hasItemsArray: Array.isArray(response?.items)
     })
     return stats
   }
 
-  // 处理响应内容项
+  for (const item of normalizedItems) {
+    if (!item || item.type !== 'tool_use') {
+      continue
+    }
 
-  for (const item of response.content) {
-    // 处理单个内容项
+    const toolName =
+      item.name || item.function?.name || item.tool_name || item.toolName || 'Unknown'
 
-    if (item.type === 'tool_use') {
-      // 获取工具名称，支持多种可能的字段位置
-      const toolName = item.name || item.function?.name || item.tool_name || 'Unknown'
+    stats.toolUsage[toolName] = (stats.toolUsage[toolName] || 0) + 1
 
-      // 统计所有工具调用次数
-      stats.toolUsage[toolName] = (stats.toolUsage[toolName] || 0) + 1
-      // 记录工具调用
+    let result = null
 
-      let result = null
+    if (isEditTool(toolName)) {
+      result = processToolUse(item)
+    } else if (toolName === 'Bash') {
+      result = processBashCommand(item)
+    } else {
+      result = processOtherTool(item)
+    }
 
-      if (isEditTool(toolName)) {
-        // 处理编辑工具
-        result = processToolUse(item)
-      } else if (toolName === 'Bash') {
-        // 处理Bash工具
-        result = processBashCommand(item)
-      } else {
-        // 处理其他工具
-        // 处理其他工具（Read、Glob等）
-        result = processOtherTool(item)
+    const results = Array.isArray(result) ? result : result ? [result] : []
+
+    for (const singleResult of results) {
+      if (!singleResult) {
+        continue
       }
 
-      if (result) {
-        // 工具处理结果
+      const editedLines = singleResult.lines || 0
+      const operations = singleResult.operations || 0
 
-        stats.totalEditedLines += result.lines
-        stats.editOperations += result.operations
+      stats.totalEditedLines += editedLines
+      stats.editOperations += operations
 
-        if (result.type === 'create') {
-          stats.newFiles++
-        } else if (result.type === 'modify') {
-          stats.modifiedFiles++
-        }
+      if (singleResult.type === 'create') {
+        stats.newFiles++
+      } else if (singleResult.type === 'modify') {
+        stats.modifiedFiles++
+      }
 
-        // 统计文件类型和语言
-        if (result.fileType) {
-          stats.fileTypes[result.fileType] = (stats.fileTypes[result.fileType] || 0) + result.lines
-        }
+      if (singleResult.fileType) {
+        stats.fileTypes[singleResult.fileType] =
+          (stats.fileTypes[singleResult.fileType] || 0) + editedLines
+      }
 
-        if (result.language) {
-          stats.languages[result.language] = (stats.languages[result.language] || 0) + result.lines
-        }
-      } else {
-        // 无编辑结果
+      if (singleResult.language) {
+        stats.languages[singleResult.language] =
+          (stats.languages[singleResult.language] || 0) + editedLines
       }
     }
   }
@@ -91,11 +92,227 @@ function extractEditStatistics(response) {
   return stats
 }
 
+function normalizeResponseItems(response) {
+  const items = []
+
+  if (!response) {
+    return items
+  }
+
+  if (Array.isArray(response.content)) {
+    for (const item of response.content) {
+      if (item?.type === 'tool_use') {
+        items.push(item)
+      }
+    }
+  }
+
+  const openaiItems = extractOpenAIItems(response)
+  if (openaiItems.length > 0) {
+    const seenKeys = new Set()
+
+    for (const rawItem of openaiItems) {
+      const normalizedList = normalizeOpenAIToolItem(rawItem)
+      for (const normalized of normalizedList) {
+        if (!normalized || normalized.type !== 'tool_use' || !normalized.name) {
+          continue
+        }
+
+        const cacheKey = `${normalized.name}|${normalized.callId || ''}|${JSON.stringify(
+          normalized.input || {}
+        )}`
+
+        if (seenKeys.has(cacheKey)) {
+          continue
+        }
+
+        seenKeys.add(cacheKey)
+        items.push(normalized)
+      }
+    }
+  }
+
+  return items
+}
+
+function extractOpenAIItems(payload) {
+  const collected = []
+
+  if (!payload || typeof payload !== 'object') {
+    return collected
+  }
+
+  if (payload.item && typeof payload.item === 'object') {
+    collected.push(payload.item)
+  }
+
+  if (Array.isArray(payload.items)) {
+    for (const item of payload.items) {
+      if (item && typeof item === 'object') {
+        collected.push(item)
+      }
+    }
+  }
+
+  if (Array.isArray(payload.output)) {
+    for (const outputItem of payload.output) {
+      if (!outputItem || typeof outputItem !== 'object') {
+        continue
+      }
+
+      collected.push(outputItem)
+
+      if (Array.isArray(outputItem.content)) {
+        for (const contentItem of outputItem.content) {
+          if (contentItem && typeof contentItem === 'object') {
+            collected.push(contentItem)
+          }
+        }
+      }
+
+      if (Array.isArray(outputItem.tool_calls)) {
+        for (const toolCall of outputItem.tool_calls) {
+          if (toolCall && typeof toolCall === 'object') {
+            collected.push(toolCall)
+          }
+        }
+      }
+    }
+  }
+
+  if (payload.response && payload.response !== payload) {
+    collected.push(...extractOpenAIItems(payload.response))
+  }
+
+  if (Array.isArray(payload.data)) {
+    for (const nested of payload.data) {
+      collected.push(...extractOpenAIItems(nested))
+    }
+  }
+
+  return collected
+}
+
+function normalizeOpenAIToolItem(item) {
+  if (!item || typeof item !== 'object') {
+    return []
+  }
+
+  const type = typeof item.type === 'string' ? item.type.toLowerCase() : ''
+  const results = []
+
+  if (type === 'custom_tool_call') {
+    const toolName = item.name || item.tool_name || 'custom_tool'
+    let input = null
+
+    if (toolName === 'apply_patch') {
+      input = { patch: item.input || '' }
+    } else if (typeof item.input === 'string') {
+      input = safeJsonParse(item.input) || { raw: item.input }
+    } else if (item.input && typeof item.input === 'object') {
+      input = item.input
+    } else {
+      input = { raw: item.input }
+    }
+
+    results.push({
+      type: 'tool_use',
+      name: toolName,
+      input,
+      callId: item.call_id || item.id,
+      source: 'openai',
+      raw: item
+    })
+  } else if (type === 'function_call') {
+    const toolName = item.name || item.function?.name || 'function_call'
+    let input =
+      safeJsonParse(item.arguments) ||
+      (item.arguments && typeof item.arguments === 'object' ? item.arguments : null) ||
+      {}
+
+    if (toolName === 'apply_patch') {
+      if (typeof input.input === 'string') {
+        input = { patch: input.input }
+      } else if (!input.patch && typeof item.arguments === 'string') {
+        input = { patch: item.arguments }
+      }
+    }
+
+    results.push({
+      type: 'tool_use',
+      name: toolName,
+      input,
+      callId: item.call_id || item.id,
+      source: 'openai',
+      raw: item
+    })
+  } else if (type === 'local_shell_call') {
+    const commandArray = item.action?.command
+    const command =
+      Array.isArray(commandArray) && commandArray.length > 0
+        ? commandArray.join(' ')
+        : typeof commandArray === 'string'
+          ? commandArray
+          : typeof item.command === 'string'
+            ? item.command
+            : ''
+
+    results.push({
+      type: 'tool_use',
+      name: 'Bash',
+      input: {
+        command,
+        working_directory: item.action?.working_directory,
+        env: item.action?.env
+      },
+      callId: item.call_id || item.id,
+      source: 'openai',
+      raw: item
+    })
+  } else if (type === 'tool_call') {
+    const toolName =
+      item.function?.name || item.name || item.tool?.name || 'function_call'
+
+    const argumentSource =
+      item.function?.arguments ??
+      item.arguments ??
+      (typeof item.input === 'string' ? item.input : null) ??
+      (item.input && typeof item.input === 'object' ? item.input : null)
+
+    let parsedArguments = {}
+
+    if (typeof argumentSource === 'string') {
+      parsedArguments = safeJsonParse(argumentSource) || {}
+    } else if (argumentSource && typeof argumentSource === 'object') {
+      parsedArguments = argumentSource
+    }
+
+    if (toolName === 'apply_patch' && typeof parsedArguments.input === 'string') {
+      parsedArguments.patch = parsedArguments.input
+    } else if (toolName === 'apply_patch' && typeof argumentSource === 'string') {
+      parsedArguments.patch = argumentSource
+    }
+
+    results.push({
+      type: 'tool_use',
+      name: toolName,
+      input: parsedArguments,
+      callId: item.id,
+      source: 'openai',
+      raw: item
+    })
+  }
+
+  return results
+}
+
 /**
  * 判断是否为编辑相关工具
  */
 function isEditTool(toolName) {
-  return ['Edit', 'MultiEdit', 'Write', 'NotebookEdit'].includes(toolName)
+  return ['Edit', 'MultiEdit', 'Write', 'NotebookEdit', 'apply_patch', 'ApplyPatch'].includes(
+    toolName
+  )
 }
 
 /**
@@ -103,6 +320,17 @@ function isEditTool(toolName) {
  */
 function processToolUse(toolUse) {
   const logger = require('../../src/utils/logger')
+
+  if (!toolUse || typeof toolUse !== 'object') {
+    logger.debug('📊 [Stats Extract] Received invalid tool_use payload', {
+      hasToolUse: !!toolUse
+    })
+    return null
+  }
+
+  if (toolUse.name === 'apply_patch' || toolUse.name === 'ApplyPatch') {
+    return processApplyPatchTool(toolUse)
+  }
 
   // 处理工具使用
 
@@ -117,49 +345,193 @@ function processToolUse(toolUse) {
   switch (toolUse.name) {
     case 'Edit':
       // Edit工具
-      result.lines = countNonEmptyLines(toolUse.input.new_string)
+      result.lines = countNonEmptyLines(toolUse.input?.new_string)
       result.type = 'modify'
-      result.fileType = extractFileType(toolUse.input.file_path)
-      result.language = detectLanguage(toolUse.input.file_path, toolUse.input.new_string)
+      result.fileType = extractFileType(toolUse.input?.file_path)
+      result.language = detectLanguage(
+        toolUse.input?.file_path,
+        toolUse.input?.new_string || ''
+      )
       break
 
     case 'MultiEdit':
       // MultiEdit工具
       result.type = 'modify'
-      result.fileType = extractFileType(toolUse.input.file_path)
+      result.fileType = extractFileType(toolUse.input?.file_path)
 
-      for (const edit of toolUse.input.edits || []) {
-        const editLines = countNonEmptyLines(edit.new_string)
+      for (const edit of toolUse.input?.edits || []) {
+        const editLines = countNonEmptyLines(edit?.new_string)
         result.lines += editLines
         // 处理单个编辑
       }
 
       result.language = detectLanguage(
-        toolUse.input.file_path,
-        toolUse.input.edits?.[0]?.new_string || ''
+        toolUse.input?.file_path,
+        toolUse.input?.edits?.[0]?.new_string || ''
       )
       break
 
     case 'Write':
       // Write工具
-      result.lines = countNonEmptyLines(toolUse.input.content)
+      result.lines = countNonEmptyLines(toolUse.input?.content)
       result.type = 'create'
-      result.fileType = extractFileType(toolUse.input.file_path)
-      result.language = detectLanguage(toolUse.input.file_path, toolUse.input.content)
+      result.fileType = extractFileType(toolUse.input?.file_path)
+      result.language = detectLanguage(
+        toolUse.input?.file_path,
+        toolUse.input?.content || ''
+      )
       break
 
     case 'NotebookEdit':
       // NotebookEdit工具
-      result.lines = countNonEmptyLines(toolUse.input.new_source)
+      result.lines = countNonEmptyLines(toolUse.input?.new_source)
       result.type = 'modify'
       result.fileType = 'ipynb'
-      result.language = toolUse.input.cell_type || 'notebook'
+      result.language = toolUse.input?.cell_type || 'notebook'
       break
   }
 
   // 工具处理完成
 
   return result
+}
+
+function processApplyPatchTool(toolUse) {
+  const logger = require('../../src/utils/logger')
+
+  const rawInput = toolUse?.input
+  let patchText = null
+
+  if (typeof rawInput === 'string') {
+    patchText = rawInput
+  } else if (rawInput && typeof rawInput === 'object') {
+    if (typeof rawInput.patch === 'string') {
+      patchText = rawInput.patch
+    } else if (typeof rawInput.input === 'string') {
+      patchText = rawInput.input
+    } else if (typeof rawInput.raw === 'string') {
+      patchText = rawInput.raw
+    } else if (typeof rawInput.text === 'string') {
+      patchText = rawInput.text
+    }
+  }
+
+  if (!patchText) {
+    logger.debug('📊 [Stats Extract] apply_patch call without patch text', {
+      hasInput: !!rawInput
+    })
+    return {
+      lines: 0,
+      operations: 1,
+      type: 'unknown',
+      fileType: null,
+      language: null
+    }
+  }
+
+  const sections = parseApplyPatchSections(patchText)
+
+  if (sections.length === 0) {
+    return {
+      lines: countNonEmptyLines(patchText),
+      operations: 1,
+      type: 'modify',
+      fileType: null,
+      language: null
+    }
+  }
+
+  return sections.map((section) => ({
+    lines: section.linesAdded,
+    operations: 1,
+    type: section.operation,
+    fileType: extractFileType(section.filePath),
+    language: detectLanguage(section.filePath),
+    filePath: section.filePath
+  }))
+}
+
+function parseApplyPatchSections(patchText) {
+  const sections = []
+  const lines = patchText.split(/\r?\n/)
+  let current = null
+
+  const finalizeCurrent = () => {
+    if (current) {
+      sections.push({ ...current })
+      current = null
+    }
+  }
+
+  for (const rawLine of lines) {
+    const line = rawLine.trimEnd()
+
+    if (line.startsWith('*** Begin Patch')) {
+      finalizeCurrent()
+      continue
+    }
+
+    if (line.startsWith('*** End Patch')) {
+      finalizeCurrent()
+      continue
+    }
+
+    const addMatch = line.match(/^\*\*\*\s+Add File:\s+(.+)$/i)
+    if (addMatch) {
+      finalizeCurrent()
+      current = {
+        filePath: addMatch[1].trim(),
+        operation: 'create',
+        linesAdded: 0
+      }
+      continue
+    }
+
+    const updateMatch = line.match(/^\*\*\*\s+Update File:\s+(.+)$/i)
+    if (updateMatch) {
+      finalizeCurrent()
+      current = {
+        filePath: updateMatch[1].trim(),
+        operation: 'modify',
+        linesAdded: 0
+      }
+      continue
+    }
+
+    const deleteMatch = line.match(/^\*\*\*\s+Delete File:\s+(.+)$/i)
+    if (deleteMatch) {
+      finalizeCurrent()
+      sections.push({
+        filePath: deleteMatch[1].trim(),
+        operation: 'delete',
+        linesAdded: 0
+      })
+      continue
+    }
+
+    const moveMatch = line.match(/^\*\*\*\s+Move to:\s+(.+)$/i)
+    if (moveMatch && current) {
+      current.filePath = moveMatch[1].trim()
+      continue
+    }
+
+    if (!current) {
+      continue
+    }
+
+    if (line.startsWith('***')) {
+      continue
+    }
+
+    if (line.startsWith('+') && !line.startsWith('+++')) {
+      if (line.slice(1).trim().length > 0) {
+        current.linesAdded += 1
+      }
+    }
+  }
+
+  finalizeCurrent()
+  return sections
 }
 
 /**
@@ -921,6 +1293,18 @@ function detectLanguageFromExtension(extension, filePath = null) {
   }
 
   return baseLanguage
+}
+
+function safeJsonParse(value) {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  try {
+    return JSON.parse(value)
+  } catch (error) {
+    return null
+  }
 }
 
 module.exports = {
