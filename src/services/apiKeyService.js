@@ -37,6 +37,7 @@ class ApiKeyService {
       weeklyOpusCostLimit = 0,
       tags = [],
       activationDays = 0, // 新增：激活后有效天数（0表示不使用此功能）
+      activationUnit = 'days', // 新增：激活时间单位 'hours' 或 'days'
       expirationMode = 'fixed', // 新增：过期模式 'fixed'(固定时间) 或 'activation'(首次使用后激活)
       icon = '' // 新增：图标（base64编码）
     } = options
@@ -73,6 +74,7 @@ class ApiKeyService {
       weeklyOpusCostLimit: String(weeklyOpusCostLimit || 0),
       tags: JSON.stringify(tags || []),
       activationDays: String(activationDays || 0), // 新增：激活后有效天数
+      activationUnit: activationUnit || 'days', // 新增：激活时间单位
       expirationMode: expirationMode || 'fixed', // 新增：过期模式
       isActivated: expirationMode === 'fixed' ? 'true' : 'false', // 根据模式决定激活状态
       activatedAt: expirationMode === 'fixed' ? new Date().toISOString() : '', // 激活时间
@@ -117,6 +119,7 @@ class ApiKeyService {
       weeklyOpusCostLimit: parseFloat(keyData.weeklyOpusCostLimit || 0),
       tags: JSON.parse(keyData.tags || '[]'),
       activationDays: parseInt(keyData.activationDays || 0),
+      activationUnit: keyData.activationUnit || 'days',
       expirationMode: keyData.expirationMode || 'fixed',
       isActivated: keyData.isActivated === 'true',
       activatedAt: keyData.activatedAt,
@@ -152,8 +155,18 @@ class ApiKeyService {
       if (keyData.expirationMode === 'activation' && keyData.isActivated !== 'true') {
         // 首次使用，需要激活
         const now = new Date()
-        const activationDays = parseInt(keyData.activationDays || 30) // 默认30天
-        const expiresAt = new Date(now.getTime() + activationDays * 24 * 60 * 60 * 1000)
+        const activationPeriod = parseInt(keyData.activationDays || 30) // 默认30
+        const activationUnit = keyData.activationUnit || 'days' // 默认天
+
+        // 根据单位计算过期时间
+        let milliseconds
+        if (activationUnit === 'hours') {
+          milliseconds = activationPeriod * 60 * 60 * 1000 // 小时转毫秒
+        } else {
+          milliseconds = activationPeriod * 24 * 60 * 60 * 1000 // 天转毫秒
+        }
+
+        const expiresAt = new Date(now.getTime() + milliseconds)
 
         // 更新激活状态和过期时间
         keyData.isActivated = 'true'
@@ -167,7 +180,7 @@ class ApiKeyService {
         logger.success(
           `🔓 API key activated: ${keyData.id} (${
             keyData.name
-          }), will expire in ${activationDays} days at ${expiresAt.toISOString()}`
+          }), will expire in ${activationPeriod} ${activationUnit} at ${expiresAt.toISOString()}`
         )
       }
 
@@ -361,6 +374,7 @@ class ApiKeyService {
           expirationMode: keyData.expirationMode || 'fixed',
           isActivated: keyData.isActivated === 'true',
           activationDays: parseInt(keyData.activationDays || 0),
+          activationUnit: keyData.activationUnit || 'days',
           activatedAt: keyData.activatedAt || null,
           claudeAccountId: keyData.claudeAccountId,
           claudeConsoleAccountId: keyData.claudeConsoleAccountId,
@@ -432,6 +446,7 @@ class ApiKeyService {
         key.dailyCost = (await redis.getDailyCost(key.id)) || 0
         key.weeklyOpusCost = (await redis.getWeeklyOpusCost(key.id)) || 0
         key.activationDays = parseInt(key.activationDays || 0)
+        key.activationUnit = key.activationUnit || 'days'
         key.expirationMode = key.expirationMode || 'fixed'
         key.isActivated = key.isActivated === 'true'
         key.activatedAt = key.activatedAt || null
@@ -541,6 +556,7 @@ class ApiKeyService {
         'permissions',
         'expiresAt',
         'activationDays', // 新增：激活后有效天数
+        'activationUnit', // 新增：激活时间单位
         'expirationMode', // 新增：过期模式
         'isActivated', // 新增：是否已激活
         'activatedAt', // 新增：激活时间
@@ -931,9 +947,46 @@ class ApiKeyService {
           await pricingService.initialize()
         }
         costInfo = pricingService.calculateCost(usageObject, model)
+
+        // 验证计算结果
+        if (!costInfo || typeof costInfo.totalCost !== 'number') {
+          logger.error(`❌ Invalid cost calculation result for model ${model}:`, costInfo)
+          // 使用 CostCalculator 作为后备
+          const CostCalculator = require('../utils/costCalculator')
+          const fallbackCost = CostCalculator.calculateCost(usageObject, model)
+          if (fallbackCost && fallbackCost.costs && fallbackCost.costs.total > 0) {
+            logger.warn(
+              `⚠️ Using fallback cost calculation for ${model}: $${fallbackCost.costs.total}`
+            )
+            costInfo = {
+              totalCost: fallbackCost.costs.total,
+              ephemeral5mCost: 0,
+              ephemeral1hCost: 0
+            }
+          } else {
+            costInfo = { totalCost: 0, ephemeral5mCost: 0, ephemeral1hCost: 0 }
+          }
+        }
       } catch (pricingError) {
-        logger.error('❌ Failed to calculate cost:', pricingError)
-        // 继续执行，不要因为费用计算失败而跳过统计记录
+        logger.error(`❌ Failed to calculate cost for model ${model}:`, pricingError)
+        logger.error(`   Usage object:`, JSON.stringify(usageObject))
+        // 使用 CostCalculator 作为后备
+        try {
+          const CostCalculator = require('../utils/costCalculator')
+          const fallbackCost = CostCalculator.calculateCost(usageObject, model)
+          if (fallbackCost && fallbackCost.costs && fallbackCost.costs.total > 0) {
+            logger.warn(
+              `⚠️ Using fallback cost calculation for ${model}: $${fallbackCost.costs.total}`
+            )
+            costInfo = {
+              totalCost: fallbackCost.costs.total,
+              ephemeral5mCost: 0,
+              ephemeral1hCost: 0
+            }
+          }
+        } catch (fallbackError) {
+          logger.error(`❌ Fallback cost calculation also failed:`, fallbackError)
+        }
       }
 
       // 提取详细的缓存创建数据
@@ -978,7 +1031,15 @@ class ApiKeyService {
           )
         }
       } else {
-        logger.debug(`💰 No cost recorded for ${keyId} - zero cost for model: ${model}`)
+        // 如果有 token 使用但费用为 0，记录警告
+        if (totalTokens > 0) {
+          logger.warn(
+            `⚠️ No cost recorded for ${keyId} - zero cost for model: ${model} (tokens: ${totalTokens})`
+          )
+          logger.warn(`   This may indicate a pricing issue or model not found in pricing data`)
+        } else {
+          logger.debug(`💰 No cost recorded for ${keyId} - zero tokens for model: ${model}`)
+        }
       }
 
       // 获取API Key数据以确定关联的账户

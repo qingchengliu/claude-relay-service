@@ -278,6 +278,32 @@
           </div>
         </div>
 
+        <!-- VSCode 插件配置 -->
+        <div class="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
+          <h6 class="mb-2 font-medium text-indigo-800 dark:text-indigo-300">
+            VSCode Claude 插件配置
+          </h6>
+          <p class="mb-3 text-sm text-indigo-700">
+            如果使用 VSCode 的 Claude 插件，需要在配置文件中进行设置：
+          </p>
+          <div class="mb-3 space-y-2">
+            <p class="text-sm text-indigo-700">
+              <strong>配置文件位置：</strong>
+              <code class="rounded bg-indigo-100 px-1"
+                >C:\Users\你的用户名\.claude\config.json</code
+              >
+            </p>
+            <p class="text-xs text-indigo-600">💡 如果该文件不存在，请手动创建。</p>
+          </div>
+          <div
+            class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+          >
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"primaryApiKey": "crs"</div>
+            <div class="whitespace-nowrap text-gray-300">}</div>
+          </div>
+        </div>
+
         <!-- 验证环境变量设置 -->
         <div class="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-3 sm:p-4">
           <h6 class="mb-2 font-medium text-blue-800 dark:text-blue-300">验证环境变量设置</h6>
@@ -425,7 +451,7 @@
               <p class="mb-3 text-sm text-yellow-700">
                 在
                 <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
-                文件中添加以下配置：
+                文件开头添加以下配置：
               </p>
               <div
                 class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
@@ -849,6 +875,30 @@
           </div>
         </div>
 
+        <!-- VSCode 插件配置 (macOS) -->
+        <div class="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
+          <h6 class="mb-2 font-medium text-indigo-800 dark:text-indigo-300">
+            VSCode Claude 插件配置
+          </h6>
+          <p class="mb-3 text-sm text-indigo-700">
+            如果使用 VSCode 的 Claude 插件，需要在配置文件中进行设置：
+          </p>
+          <div class="mb-3 space-y-2">
+            <p class="text-sm text-indigo-700">
+              <strong>配置文件位置：</strong>
+              <code class="rounded bg-indigo-100 px-1">~/.claude/config.json</code>
+            </p>
+            <p class="text-xs text-indigo-600">💡 如果该文件不存在，请手动创建。</p>
+          </div>
+          <div
+            class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+          >
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"primaryApiKey": "crs"</div>
+            <div class="whitespace-nowrap text-gray-300">}</div>
+          </div>
+        </div>
+
         <!-- Gemini CLI 环境变量设置 -->
         <div class="mt-8">
           <h5
@@ -956,7 +1006,7 @@
               <p class="mb-3 text-sm text-yellow-700">
                 在
                 <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
-                文件中添加以下配置：
+                文件开头添加以下配置：
               </p>
               <div
                 class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
@@ -1478,7 +1528,7 @@
               <p class="mb-3 text-sm text-yellow-700">
                 在
                 <code class="rounded bg-yellow-100 px-1">~/.codex/config.toml</code>
-                文件中添加以下配置：
+                文件开头添加以下配置：
               </p>
               <div
                 class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
@@ -1553,6 +1603,58 @@
                   </div>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- VSCode 插件配置 (Linux) -->
+        <div class="mt-6 rounded-lg border border-indigo-200 bg-indigo-50 p-3 sm:p-4">
+          <h6 class="mb-2 font-medium text-indigo-800 dark:text-indigo-300">
+            VSCode Claude 插件配置
+          </h6>
+          <p class="mb-3 text-sm text-indigo-700">
+            如果使用 VSCode 的 Claude 插件，请在 VSCode 设置中为扩展添加以下环境变量：
+          </p>
+          <div class="mb-3 space-y-2">
+            <p class="text-sm text-indigo-700">
+              <strong>操作步骤：</strong>
+              打开 VSCode，依次选择「文件」→「首选项」→「设置」，搜索
+              <code class="rounded bg-indigo-100 px-1">Claude Code: Environment Variables</code>
+              并点击「在 settings.json 中编辑」。
+            </p>
+            <p class="text-xs text-indigo-600">
+              💡 也可以直接编辑
+              <code class="rounded bg-indigo-100 px-1">~/.config/Code/User/settings.json</code>。
+            </p>
+          </div>
+          <div
+            class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+          >
+            <div class="whitespace-nowrap text-gray-300">"claude-code.environmentVariables": [</div>
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"name": "ANTHROPIC_BASE_URL",</div>
+            <div class="whitespace-nowrap text-gray-300">"value": "{{ currentBaseUrl }}"</div>
+            <div class="whitespace-nowrap text-gray-300">},</div>
+            <div class="whitespace-nowrap text-gray-300">{</div>
+            <div class="whitespace-nowrap text-gray-300">"name": "ANTHROPIC_AUTH_TOKEN",</div>
+            <div class="whitespace-nowrap text-gray-300">"value": "你的API密钥"</div>
+            <div class="whitespace-nowrap text-gray-300">}</div>
+            <div class="whitespace-nowrap text-gray-300">]</div>
+          </div>
+          <p class="mt-3 text-xs text-indigo-600">
+            💡 保存后重启 VSCode。如果仍提示 “Invalid API key”，请确认所填密钥有效且未过期。
+          </p>
+          <div class="mt-4 rounded-lg border border-indigo-200 bg-white p-3 sm:p-4">
+            <p class="mb-3 text-sm text-indigo-700">
+              需要在配置文件中<code class="rounded bg-indigo-100 px-1">~/.claude/config.json</code
+              >进行设置：
+            </p>
+            <div
+              class="overflow-x-auto rounded bg-gray-900 p-2 font-mono text-xs text-green-400 sm:p-3 sm:text-sm"
+            >
+              <div class="whitespace-nowrap text-gray-300">{</div>
+              <div class="whitespace-nowrap text-gray-300">"primaryApiKey": "crs"</div>
+              <div class="whitespace-nowrap text-gray-300">}</div>
             </div>
           </div>
         </div>
