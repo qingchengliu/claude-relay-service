@@ -71,7 +71,7 @@
               <!-- 平台分组选择器 -->
               <div class="space-y-3">
                 <!-- 分组选择器 -->
-                <div class="grid grid-cols-3 gap-2">
+                <div class="grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <!-- Claude 分组 -->
                   <div
                     class="group relative cursor-pointer overflow-hidden rounded-lg border-2 transition-all duration-200"
@@ -171,6 +171,37 @@
                         Gemini
                       </h4>
                       <p class="text-xs text-gray-600 dark:text-gray-400">Google AI</p>
+                    </div>
+                  </div>
+
+                  <!-- Droid 分组 -->
+                  <div
+                    class="group relative cursor-pointer overflow-hidden rounded-lg border-2 transition-all duration-200"
+                    :class="[
+                      platformGroup === 'droid'
+                        ? 'border-rose-500 bg-gradient-to-br from-rose-50 to-orange-50 shadow-md dark:from-rose-900/20 dark:to-orange-900/20'
+                        : 'border-gray-200 bg-white hover:border-rose-300 hover:shadow dark:border-gray-700 dark:bg-gray-800 dark:hover:border-rose-600'
+                    ]"
+                    @click="selectPlatformGroup('droid')"
+                  >
+                    <div class="p-3">
+                      <div class="flex items-center justify-between">
+                        <div
+                          class="flex h-8 w-8 items-center justify-center rounded-md bg-gradient-to-br from-rose-500 to-orange-500"
+                        >
+                          <i class="fas fa-robot text-sm text-white"></i>
+                        </div>
+                        <div
+                          v-if="platformGroup === 'droid'"
+                          class="flex h-5 w-5 items-center justify-center rounded-full bg-rose-500"
+                        >
+                          <i class="fas fa-check text-xs text-white"></i>
+                        </div>
+                      </div>
+                      <h4 class="mt-2 text-sm font-semibold text-gray-900 dark:text-gray-100">
+                        Droid
+                      </h4>
+                      <p class="text-xs text-gray-600 dark:text-gray-400">Claude Droid</p>
                     </div>
                   </div>
                 </div>
@@ -447,6 +478,35 @@
                         </div>
                       </label>
                     </template>
+
+                    <!-- Droid 子选项 -->
+                    <template v-if="platformGroup === 'droid'">
+                      <label
+                        class="group relative flex cursor-pointer items-center rounded-md border p-2 transition-all"
+                        :class="[
+                          form.platform === 'droid'
+                            ? 'border-rose-500 bg-rose-50 dark:border-rose-400 dark:bg-rose-900/30'
+                            : 'border-gray-300 bg-white hover:border-rose-400 hover:bg-rose-50/50 dark:border-gray-600 dark:bg-gray-700 dark:hover:border-rose-500 dark:hover:bg-rose-900/20'
+                        ]"
+                      >
+                        <input v-model="form.platform" class="sr-only" type="radio" value="droid" />
+                        <div class="flex items-center gap-2">
+                          <i class="fas fa-robot text-sm text-rose-600 dark:text-rose-400"></i>
+                          <div>
+                            <span class="block text-xs font-medium text-gray-900 dark:text-gray-100"
+                              >Droid 专属</span
+                            >
+                            <span class="text-xs text-gray-500 dark:text-gray-400">官方</span>
+                          </div>
+                        </div>
+                        <div
+                          v-if="form.platform === 'droid'"
+                          class="absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500"
+                        >
+                          <i class="fas fa-check text-xs text-white"></i>
+                        </div>
+                      </label>
+                    </template>
                   </div>
                 </div>
               </div>
@@ -473,9 +533,11 @@
                     type="radio"
                     value="oauth"
                   />
-                  <span class="text-sm text-gray-700 dark:text-gray-300"
-                    >OAuth 授权 (用量可视化)</span
-                  >
+                  <span class="text-sm text-gray-700 dark:text-gray-300">
+                    OAuth 授权<span v-if="form.platform === 'claude' || form.platform === 'openai'">
+                      (用量可视化)</span
+                    >
+                  </span>
                 </label>
                 <label v-if="form.platform === 'claude'" class="flex cursor-pointer items-center">
                   <input
@@ -495,6 +557,17 @@
                   />
                   <span class="text-sm text-gray-700 dark:text-gray-300"
                     >手动输入 Access Token</span
+                  >
+                </label>
+                <label v-if="form.platform === 'droid'" class="flex cursor-pointer items-center">
+                  <input
+                    v-model="form.addType"
+                    class="mr-2 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                    type="radio"
+                    value="apikey"
+                  />
+                  <span class="text-sm text-gray-700 dark:text-gray-300"
+                    >使用 API Key (支持多个)</span
                   >
                 </label>
               </div>
@@ -565,6 +638,49 @@
               <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
                 共享账户：供所有API Key使用；专属账户：仅供特定API
                 Key使用；分组调度：加入分组供分组内调度
+              </p>
+            </div>
+
+            <!-- 到期时间 - 仅在创建账户时显示，编辑时使用独立的过期时间编辑弹窗 -->
+            <div v-if="!isEdit">
+              <label class="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >到期时间 (可选)</label
+              >
+              <div
+                class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800"
+              >
+                <select
+                  v-model="form.expireDuration"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  @change="updateAccountExpireAt"
+                >
+                  <option value="">永不过期</option>
+                  <option value="30d">30 天</option>
+                  <option value="90d">90 天</option>
+                  <option value="180d">180 天</option>
+                  <option value="365d">365 天</option>
+                  <option value="custom">自定义日期</option>
+                </select>
+                <div v-if="form.expireDuration === 'custom'" class="mt-3">
+                  <input
+                    v-model="form.customExpireDate"
+                    class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                    :min="minDateTime"
+                    type="datetime-local"
+                    @change="updateAccountCustomExpireAt"
+                  />
+                </div>
+                <p v-if="form.expiresAt" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  <i class="fas fa-calendar-alt mr-1" />
+                  将于 {{ formatExpireDate(form.expiresAt) }} 过期
+                </p>
+                <p v-else class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  <i class="fas fa-infinity mr-1" />
+                  账户永不过期
+                </p>
+              </div>
+              <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                设置 Claude Max/Pro 订阅的到期时间，到期后将停止调度此账户
               </p>
             </div>
 
@@ -1028,97 +1144,167 @@
 
               <div>
                 <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
-                  >模型映射表 (可选)</label
+                  >模型限制 (可选)</label
                 >
-                <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/30">
-                  <p class="text-xs text-blue-700 dark:text-blue-400">
-                    <i class="fas fa-info-circle mr-1" />
-                    留空表示支持所有模型且不修改请求。配置映射后，左侧模型会被识别为支持的模型，右侧是实际发送的模型。
+
+                <!-- 模式切换 -->
+                <div class="mb-4 flex gap-2">
+                  <button
+                    class="flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all"
+                    :class="
+                      modelRestrictionMode === 'whitelist'
+                        ? 'bg-blue-500 text-white shadow-md'
+                        : 'border border-gray-300 text-gray-600 hover:border-blue-300 dark:border-gray-600 dark:text-gray-400 dark:hover:border-blue-500'
+                    "
+                    type="button"
+                    @click="modelRestrictionMode = 'whitelist'"
+                  >
+                    <i class="fas fa-check-circle mr-2" />
+                    模型白名单
+                  </button>
+                  <button
+                    class="flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all"
+                    :class="
+                      modelRestrictionMode === 'mapping'
+                        ? 'bg-purple-500 text-white shadow-md'
+                        : 'border border-gray-300 text-gray-600 hover:border-purple-300 dark:border-gray-600 dark:text-gray-400 dark:hover:border-purple-500'
+                    "
+                    type="button"
+                    @click="modelRestrictionMode = 'mapping'"
+                  >
+                    <i class="fas fa-random mr-2" />
+                    模型映射
+                  </button>
+                </div>
+
+                <!-- 白名单模式 -->
+                <div v-if="modelRestrictionMode === 'whitelist'">
+                  <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/30">
+                    <p class="text-xs text-blue-700 dark:text-blue-400">
+                      <i class="fas fa-info-circle mr-1" />
+                      选择允许使用此账户的模型。留空表示支持所有模型。
+                    </p>
+                  </div>
+
+                  <!-- 模型复选框列表 -->
+                  <div class="mb-3 grid grid-cols-2 gap-2">
+                    <label
+                      v-for="model in commonModels"
+                      :key="model.value"
+                      class="flex cursor-pointer items-center rounded-lg border p-3 transition-all hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                      :class="
+                        allowedModels.includes(model.value)
+                          ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30'
+                          : 'border-gray-300'
+                      "
+                    >
+                      <input
+                        v-model="allowedModels"
+                        class="mr-2 text-blue-600 focus:ring-blue-500"
+                        type="checkbox"
+                        :value="model.value"
+                      />
+                      <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{
+                        model.label
+                      }}</span>
+                    </label>
+                  </div>
+
+                  <p class="text-xs text-gray-500 dark:text-gray-400">
+                    已选择 {{ allowedModels.length }} 个模型
+                    <span v-if="allowedModels.length === 0">（支持所有模型）</span>
                   </p>
                 </div>
 
-                <!-- 模型映射表 -->
-                <div class="mb-3 space-y-2">
-                  <div
-                    v-for="(mapping, index) in modelMappings"
-                    :key="index"
-                    class="flex items-center gap-2"
-                  >
-                    <input
-                      v-model="mapping.from"
-                      class="form-input flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                      placeholder="原始模型名称"
-                      type="text"
-                    />
-                    <i class="fas fa-arrow-right text-gray-400 dark:text-gray-500" />
-                    <input
-                      v-model="mapping.to"
-                      class="form-input flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
-                      placeholder="映射后的模型名称"
-                      type="text"
-                    />
-                    <button
-                      class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
-                      type="button"
-                      @click="removeModelMapping(index)"
+                <!-- 映射模式 -->
+                <div v-else>
+                  <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/30">
+                    <p class="text-xs text-purple-700 dark:text-purple-400">
+                      <i class="fas fa-info-circle mr-1" />
+                      配置模型映射关系。左侧是客户端请求的模型，右侧是实际发送给API的模型。
+                    </p>
+                  </div>
+
+                  <!-- 模型映射表 -->
+                  <div class="mb-3 space-y-2">
+                    <div
+                      v-for="(mapping, index) in modelMappings"
+                      :key="index"
+                      class="flex items-center gap-2"
                     >
-                      <i class="fas fa-trash" />
+                      <input
+                        v-model="mapping.from"
+                        class="form-input flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                        placeholder="原始模型名称"
+                        type="text"
+                      />
+                      <i class="fas fa-arrow-right text-gray-400 dark:text-gray-500" />
+                      <input
+                        v-model="mapping.to"
+                        class="form-input flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                        placeholder="映射后的模型名称"
+                        type="text"
+                      />
+                      <button
+                        class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+                        type="button"
+                        @click="removeModelMapping(index)"
+                      >
+                        <i class="fas fa-trash" />
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- 添加映射按钮 -->
+                  <button
+                    class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-300"
+                    type="button"
+                    @click="addModelMapping"
+                  >
+                    <i class="fas fa-plus mr-2" />
+                    添加模型映射
+                  </button>
+
+                  <!-- 快捷添加按钮 -->
+                  <div class="mt-3 flex flex-wrap gap-2">
+                    <button
+                      class="rounded-lg bg-blue-100 px-3 py-1 text-xs text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
+                      type="button"
+                      @click="
+                        addPresetMapping('claude-sonnet-4-20250514', 'claude-sonnet-4-20250514')
+                      "
+                    >
+                      + Sonnet 4
+                    </button>
+                    <button
+                      class="rounded-lg bg-purple-100 px-3 py-1 text-xs text-purple-700 transition-colors hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50"
+                      type="button"
+                      @click="
+                        addPresetMapping('claude-opus-4-1-20250805', 'claude-opus-4-1-20250805')
+                      "
+                    >
+                      + Opus 4.1
+                    </button>
+                    <button
+                      class="rounded-lg bg-green-100 px-3 py-1 text-xs text-green-700 transition-colors hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50"
+                      type="button"
+                      @click="
+                        addPresetMapping('claude-3-5-haiku-20241022', 'claude-3-5-haiku-20241022')
+                      "
+                    >
+                      + Haiku 3.5
+                    </button>
+                    <button
+                      class="rounded-lg bg-orange-100 px-3 py-1 text-xs text-orange-700 transition-colors hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:hover:bg-orange-900/50"
+                      type="button"
+                      @click="
+                        addPresetMapping('claude-opus-4-1-20250805', 'claude-sonnet-4-20250514')
+                      "
+                    >
+                      + Opus → Sonnet
                     </button>
                   </div>
                 </div>
-
-                <!-- 添加映射按钮 -->
-                <button
-                  class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500 dark:hover:text-gray-300"
-                  type="button"
-                  @click="addModelMapping"
-                >
-                  <i class="fas fa-plus mr-2" />
-                  添加模型映射
-                </button>
-
-                <!-- 快捷添加按钮 -->
-                <div class="mt-3 flex flex-wrap gap-2">
-                  <button
-                    class="rounded-lg bg-blue-100 px-3 py-1 text-xs text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
-                    type="button"
-                    @click="
-                      addPresetMapping('claude-sonnet-4-20250514', 'claude-sonnet-4-20250514')
-                    "
-                  >
-                    + Sonnet 4
-                  </button>
-                  <button
-                    class="rounded-lg bg-purple-100 px-3 py-1 text-xs text-purple-700 transition-colors hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50"
-                    type="button"
-                    @click="
-                      addPresetMapping('claude-opus-4-1-20250805', 'claude-opus-4-1-20250805')
-                    "
-                  >
-                    + Opus 4.1
-                  </button>
-                  <button
-                    class="rounded-lg bg-green-100 px-3 py-1 text-xs text-green-700 transition-colors hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50"
-                    type="button"
-                    @click="
-                      addPresetMapping('claude-3-5-haiku-20241022', 'claude-3-5-haiku-20241022')
-                    "
-                  >
-                    + Haiku 3.5
-                  </button>
-                  <button
-                    class="rounded-lg bg-orange-100 px-3 py-1 text-xs text-orange-700 transition-colors hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:hover:bg-orange-900/50"
-                    type="button"
-                    @click="
-                      addPresetMapping('claude-opus-4-1-20250805', 'claude-sonnet-4-20250514')
-                    "
-                  >
-                    + Opus 4.1 → Sonnet 4
-                  </button>
-                </div>
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  留空表示支持所有模型。如果指定模型，请求中的模型不在列表内将不会调度到此账号
-                </p>
               </div>
 
               <div>
@@ -1448,6 +1634,12 @@
                     请输入有效的 OpenAI Access Token。如果您有 Refresh
                     Token，建议也一并填写以支持自动刷新。
                   </p>
+                  <p
+                    v-else-if="form.platform === 'droid'"
+                    class="mb-2 text-sm text-blue-800 dark:text-blue-300"
+                  >
+                    请输入有效的 Droid Access Token，并同时提供 Refresh Token 以支持自动刷新。
+                  </p>
                   <div
                     class="mb-2 mt-2 rounded-lg border border-blue-300 bg-white/80 p-3 dark:border-blue-600 dark:bg-gray-800/80"
                   >
@@ -1482,9 +1674,22 @@
                       请从已登录 OpenAI 账户的机器上获取认证凭证， 或通过 OAuth 授权流程获取 Access
                       Token。
                     </p>
+                    <p
+                      v-else-if="form.platform === 'droid'"
+                      class="text-xs text-blue-800 dark:text-blue-300"
+                    >
+                      请从已完成授权的 Droid CLI 或 Factory.ai 导出的凭证中获取 Access Token 与
+                      Refresh Token。
+                    </p>
                   </div>
-                  <p class="text-xs text-blue-600 dark:text-blue-400">
+                  <p
+                    v-if="form.platform !== 'droid'"
+                    class="text-xs text-blue-600 dark:text-blue-400"
+                  >
                     💡 如果未填写 Refresh Token，Token 过期后需要手动更新。
+                  </p>
+                  <p v-else class="text-xs text-red-600 dark:text-red-400">
+                    ⚠️ Droid 账户必须填写 Refresh Token，缺失将导致无法自动刷新 Access Token。
                   </p>
                 </div>
               </div>
@@ -1522,7 +1727,7 @@
                 </p>
               </div>
 
-              <div v-if="form.platform === 'openai'">
+              <div v-if="form.platform === 'openai' || form.platform === 'droid'">
                 <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
                   >Refresh Token *</label
                 >
@@ -1539,7 +1744,12 @@
                 </p>
                 <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
                   <i class="fas fa-info-circle mr-1" />
-                  系统将使用 Refresh Token 自动获取 Access Token 和用户信息
+                  <template v-if="form.platform === 'openai'">
+                    系统将使用 Refresh Token 自动获取 Access Token 和用户信息
+                  </template>
+                  <template v-else>
+                    系统将使用 Refresh Token 自动刷新 Factory.ai 访问令牌，确保账户保持可用。
+                  </template>
                 </p>
               </div>
 
@@ -1553,6 +1763,63 @@
                   placeholder="请输入 Refresh Token..."
                   rows="4"
                 />
+              </div>
+            </div>
+
+            <!-- API Key 模式输入 -->
+            <div
+              v-if="form.addType === 'apikey' && form.platform === 'droid'"
+              class="space-y-4 rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-700 dark:bg-purple-900/30"
+            >
+              <div class="mb-4 flex items-start gap-3">
+                <div
+                  class="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-purple-500"
+                >
+                  <i class="fas fa-key text-sm text-white" />
+                </div>
+                <div>
+                  <h5 class="mb-2 font-semibold text-purple-900 dark:text-purple-200">
+                    使用 API Key 调度 Droid
+                  </h5>
+                  <p class="text-sm text-purple-800 dark:text-purple-200">
+                    请填写一个或多个 Factory.ai API
+                    Key，系统会自动在请求时随机挑选并结合会话哈希维持粘性，确保对话上下文保持稳定。
+                  </p>
+                </div>
+              </div>
+
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >API Key 列表 *</label
+                >
+                <textarea
+                  v-model="form.apiKeysInput"
+                  class="form-input w-full resize-none border-gray-300 font-mono text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  :class="{ 'border-red-500': errors.apiKeys }"
+                  placeholder="每行一个 API Key，可粘贴多行"
+                  required
+                  rows="6"
+                />
+                <p v-if="errors.apiKeys" class="mt-1 text-xs text-red-500">
+                  {{ errors.apiKeys }}
+                </p>
+                <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                  <i class="fas fa-info-circle mr-1" />
+                  建议为每条 Key 提供独立额度；系统会自动去重并忽略空白行。
+                </p>
+              </div>
+
+              <div
+                class="rounded-lg border border-purple-200 bg-white/70 p-3 text-xs text-purple-800 dark:border-purple-700 dark:bg-purple-800/20 dark:text-purple-100"
+              >
+                <p class="font-medium"><i class="fas fa-random mr-1" />分配策略说明</p>
+                <ul class="mt-1 list-disc space-y-1 pl-4">
+                  <li>新会话将随机命中一个 Key，并在会话有效期内保持粘性。</li>
+                  <li>若某 Key 失效，会自动切换到剩余可用 Key，最大化成功率。</li>
+                  <li>
+                    若上游返回 4xx 错误码，该 Key 会被自动移除；全部 Key 清空后账号将暂停调度。
+                  </li>
+                </ul>
               </div>
             </div>
 
@@ -1842,6 +2109,49 @@
             <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
               共享账户：供所有API Key使用；专属账户：仅供特定API
               Key使用；分组调度：加入分组供分组内调度
+            </p>
+          </div>
+
+          <!-- 到期时间 - 仅在创建账户时显示，编辑时使用独立的过期时间编辑弹窗 -->
+          <div v-if="!isEdit">
+            <label class="mb-2 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+              >到期时间 (可选)</label
+            >
+            <div
+              class="rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-700 dark:bg-gray-800"
+            >
+              <select
+                v-model="form.expireDuration"
+                class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                @change="updateAccountExpireAt"
+              >
+                <option value="">永不过期</option>
+                <option value="30d">30 天</option>
+                <option value="90d">90 天</option>
+                <option value="180d">180 天</option>
+                <option value="365d">365 天</option>
+                <option value="custom">自定义日期</option>
+              </select>
+              <div v-if="form.expireDuration === 'custom'" class="mt-3">
+                <input
+                  v-model="form.customExpireDate"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  :min="minDateTime"
+                  type="datetime-local"
+                  @change="updateAccountCustomExpireAt"
+                />
+              </div>
+              <p v-if="form.expiresAt" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                <i class="fas fa-calendar-alt mr-1" />
+                将于 {{ formatExpireDate(form.expiresAt) }} 过期
+              </p>
+              <p v-else class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                <i class="fas fa-infinity mr-1" />
+                账户永不过期
+              </p>
+            </div>
+            <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              设置 Claude Max/Pro 订阅的到期时间，到期后将停止调度此账户
             </p>
           </div>
 
@@ -2184,92 +2494,168 @@
             </div>
 
             <div>
-              <label class="mb-3 block text-sm font-semibold text-gray-700"
-                >模型映射表 (可选)</label
+              <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                >模型限制 (可选)</label
               >
-              <div class="mb-3 rounded-lg bg-blue-50 p-3">
-                <p class="text-xs text-blue-700">
-                  <i class="fas fa-info-circle mr-1" />
-                  留空表示支持所有模型且不修改请求。配置映射后，左侧模型会被识别为支持的模型，右侧是实际发送的模型。
+
+              <!-- 模式切换 -->
+              <div class="mb-4 flex gap-2">
+                <button
+                  class="flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all"
+                  :class="
+                    modelRestrictionMode === 'whitelist'
+                      ? 'bg-blue-500 text-white shadow-md'
+                      : 'border border-gray-300 text-gray-600 hover:border-blue-300 dark:border-gray-600 dark:text-gray-400 dark:hover:border-blue-500'
+                  "
+                  type="button"
+                  @click="modelRestrictionMode = 'whitelist'"
+                >
+                  <i class="fas fa-check-circle mr-2" />
+                  模型白名单
+                </button>
+                <button
+                  class="flex-1 rounded-lg px-4 py-2 text-sm font-medium transition-all"
+                  :class="
+                    modelRestrictionMode === 'mapping'
+                      ? 'bg-purple-500 text-white shadow-md'
+                      : 'border border-gray-300 text-gray-600 hover:border-purple-300 dark:border-gray-600 dark:text-gray-400 dark:hover:border-purple-500'
+                  "
+                  type="button"
+                  @click="modelRestrictionMode = 'mapping'"
+                >
+                  <i class="fas fa-random mr-2" />
+                  模型映射
+                </button>
+              </div>
+
+              <!-- 白名单模式 -->
+              <div v-if="modelRestrictionMode === 'whitelist'">
+                <div class="mb-3 rounded-lg bg-blue-50 p-3 dark:bg-blue-900/30">
+                  <p class="text-xs text-blue-700 dark:text-blue-400">
+                    <i class="fas fa-info-circle mr-1" />
+                    选择允许使用此账户的模型。留空表示支持所有模型。
+                  </p>
+                </div>
+
+                <!-- 模型复选框列表 -->
+                <div class="mb-3 grid grid-cols-2 gap-2">
+                  <label
+                    v-for="model in commonModels"
+                    :key="model.value"
+                    class="flex cursor-pointer items-center rounded-lg border p-3 transition-all hover:bg-gray-50 dark:border-gray-600 dark:hover:bg-gray-700"
+                    :class="
+                      allowedModels.includes(model.value)
+                        ? 'border-blue-500 bg-blue-50 dark:border-blue-400 dark:bg-blue-900/30'
+                        : 'border-gray-300'
+                    "
+                  >
+                    <input
+                      v-model="allowedModels"
+                      class="mr-2 text-blue-600 focus:ring-blue-500"
+                      type="checkbox"
+                      :value="model.value"
+                    />
+                    <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{
+                      model.label
+                    }}</span>
+                  </label>
+                </div>
+
+                <p class="text-xs text-gray-500 dark:text-gray-400">
+                  已选择 {{ allowedModels.length }} 个模型
+                  <span v-if="allowedModels.length === 0">（支持所有模型）</span>
                 </p>
               </div>
 
-              <!-- 模型映射表 -->
-              <div class="mb-3 space-y-2">
-                <div
-                  v-for="(mapping, index) in modelMappings"
-                  :key="index"
-                  class="flex items-center gap-2"
-                >
-                  <input
-                    v-model="mapping.from"
-                    class="form-input flex-1"
-                    placeholder="原始模型名称"
-                    type="text"
-                  />
-                  <i class="fas fa-arrow-right text-gray-400" />
-                  <input
-                    v-model="mapping.to"
-                    class="form-input flex-1"
-                    placeholder="映射后的模型名称"
-                    type="text"
-                  />
-                  <button
-                    class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50"
-                    type="button"
-                    @click="removeModelMapping(index)"
+              <!-- 映射模式 -->
+              <div v-else>
+                <div class="mb-3 rounded-lg bg-purple-50 p-3 dark:bg-purple-900/30">
+                  <p class="text-xs text-purple-700 dark:text-purple-400">
+                    <i class="fas fa-info-circle mr-1" />
+                    配置模型映射关系。左侧是客户端请求的模型，右侧是实际发送给API的模型。
+                  </p>
+                </div>
+
+                <!-- 模型映射表 -->
+                <div class="mb-3 space-y-2">
+                  <div
+                    v-for="(mapping, index) in modelMappings"
+                    :key="index"
+                    class="flex items-center gap-2"
                   >
-                    <i class="fas fa-trash" />
+                    <input
+                      v-model="mapping.from"
+                      class="form-input flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                      placeholder="原始模型名称"
+                      type="text"
+                    />
+                    <i class="fas fa-arrow-right text-gray-400 dark:text-gray-500" />
+                    <input
+                      v-model="mapping.to"
+                      class="form-input flex-1 border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                      placeholder="映射后的模型名称"
+                      type="text"
+                    />
+                    <button
+                      class="rounded-lg p-2 text-red-500 transition-colors hover:bg-red-50 dark:hover:bg-red-900/20"
+                      type="button"
+                      @click="removeModelMapping(index)"
+                    >
+                      <i class="fas fa-trash" />
+                    </button>
+                  </div>
+                </div>
+
+                <!-- 添加映射按钮 -->
+                <button
+                  class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700 dark:border-gray-600 dark:text-gray-400 dark:hover:border-gray-500"
+                  type="button"
+                  @click="addModelMapping"
+                >
+                  <i class="fas fa-plus mr-2" />
+                  添加模型映射
+                </button>
+
+                <!-- 快捷添加按钮 -->
+                <div class="mt-3 flex flex-wrap gap-2">
+                  <button
+                    class="rounded-lg bg-blue-100 px-3 py-1 text-xs text-blue-700 transition-colors hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400 dark:hover:bg-blue-900/50"
+                    type="button"
+                    @click="
+                      addPresetMapping('claude-sonnet-4-20250514', 'claude-sonnet-4-20250514')
+                    "
+                  >
+                    + Sonnet 4
+                  </button>
+                  <button
+                    class="rounded-lg bg-purple-100 px-3 py-1 text-xs text-purple-700 transition-colors hover:bg-purple-200 dark:bg-purple-900/30 dark:text-purple-400 dark:hover:bg-purple-900/50"
+                    type="button"
+                    @click="
+                      addPresetMapping('claude-opus-4-1-20250805', 'claude-opus-4-1-20250805')
+                    "
+                  >
+                    + Opus 4.1
+                  </button>
+                  <button
+                    class="rounded-lg bg-green-100 px-3 py-1 text-xs text-green-700 transition-colors hover:bg-green-200 dark:bg-green-900/30 dark:text-green-400 dark:hover:bg-green-900/50"
+                    type="button"
+                    @click="
+                      addPresetMapping('claude-3-5-haiku-20241022', 'claude-3-5-haiku-20241022')
+                    "
+                  >
+                    + Haiku 3.5
+                  </button>
+                  <button
+                    class="rounded-lg bg-orange-100 px-3 py-1 text-xs text-orange-700 transition-colors hover:bg-orange-200 dark:bg-orange-900/30 dark:text-orange-400 dark:hover:bg-orange-900/50"
+                    type="button"
+                    @click="
+                      addPresetMapping('claude-opus-4-1-20250805', 'claude-sonnet-4-20250514')
+                    "
+                  >
+                    + Opus → Sonnet
                   </button>
                 </div>
               </div>
-
-              <!-- 添加映射按钮 -->
-              <button
-                class="w-full rounded-lg border-2 border-dashed border-gray-300 px-4 py-2 text-gray-600 transition-colors hover:border-gray-400 hover:text-gray-700"
-                type="button"
-                @click="addModelMapping"
-              >
-                <i class="fas fa-plus mr-2" />
-                添加模型映射
-              </button>
-
-              <!-- 快捷添加按钮 -->
-              <div class="mt-3 flex flex-wrap gap-2">
-                <button
-                  class="rounded-lg bg-blue-100 px-3 py-1 text-xs text-blue-700 transition-colors hover:bg-blue-200"
-                  type="button"
-                  @click="addPresetMapping('claude-sonnet-4-20250514', 'claude-sonnet-4-20250514')"
-                >
-                  + Sonnet 4
-                </button>
-                <button
-                  class="rounded-lg bg-purple-100 px-3 py-1 text-xs text-purple-700 transition-colors hover:bg-purple-200"
-                  type="button"
-                  @click="addPresetMapping('claude-opus-4-1-20250805', 'claude-opus-4-1-20250805')"
-                >
-                  + Opus 4.1
-                </button>
-                <button
-                  class="rounded-lg bg-green-100 px-3 py-1 text-xs text-green-700 transition-colors hover:bg-green-200"
-                  type="button"
-                  @click="
-                    addPresetMapping('claude-3-5-haiku-20241022', 'claude-3-5-haiku-20241022')
-                  "
-                >
-                  + Haiku 3.5
-                </button>
-                <button
-                  class="rounded-lg bg-orange-100 px-3 py-1 text-xs text-orange-700 transition-colors hover:bg-orange-200"
-                  type="button"
-                  @click="addPresetMapping('claude-opus-4-1-20250805', 'claude-sonnet-4-20250514')"
-                >
-                  + Opus 4.1 → Sonnet 4
-                </button>
-              </div>
-              <p class="mt-1 text-xs text-gray-500">
-                留空表示支持所有模型。如果指定模型，请求中的模型不在列表内将不会调度到此账号
-              </p>
             </div>
 
             <div>
@@ -2616,7 +3002,99 @@
 
           <!-- Token 更新 -->
           <div
+            v-if="isEdit && isEditingDroidApiKey"
+            class="rounded-lg border border-purple-200 bg-purple-50 p-4 dark:border-purple-700 dark:bg-purple-900/30"
+          >
+            <div class="mb-4 flex items-start gap-3">
+              <div
+                class="mt-1 flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-purple-500"
+              >
+                <i class="fas fa-retweet text-sm text-white" />
+              </div>
+              <div>
+                <h5 class="mb-2 font-semibold text-purple-900 dark:text-purple-200">
+                  更新 API Key
+                </h5>
+                <p class="mb-1 text-sm text-purple-800 dark:text-purple-200">
+                  当前已保存 <strong>{{ existingApiKeyCount }}</strong> 条 API Key。您可以追加新的
+                  Key，或通过下方模式快速覆盖、删除指定 Key。
+                </p>
+                <p class="text-xs text-purple-700 dark:text-purple-300">
+                  留空表示保留现有 Key 不变；根据所选模式决定是追加、覆盖还是删除输入的 Key。
+                </p>
+              </div>
+            </div>
+
+            <div class="space-y-4">
+              <div>
+                <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
+                  >新的 API Key 列表</label
+                >
+                <textarea
+                  v-model="form.apiKeysInput"
+                  class="form-input w-full resize-none border-gray-300 font-mono text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200 dark:placeholder-gray-400"
+                  :class="{ 'border-red-500': errors.apiKeys }"
+                  placeholder="根据模式填写；每行一个 API Key"
+                  rows="6"
+                />
+                <p v-if="errors.apiKeys" class="mt-1 text-xs text-red-500">
+                  {{ errors.apiKeys }}
+                </p>
+              </div>
+
+              <div class="space-y-2">
+                <div class="flex items-center justify-between">
+                  <span class="text-sm font-semibold text-purple-800 dark:text-purple-100"
+                    >API Key 更新模式</span
+                  >
+                  <span class="text-xs text-purple-600 dark:text-purple-300">
+                    {{ currentApiKeyModeLabel }}
+                  </span>
+                </div>
+                <div
+                  class="relative grid h-11 grid-cols-3 overflow-hidden rounded-2xl border border-purple-200/80 bg-gradient-to-r from-purple-50/80 via-white to-purple-50/80 shadow-inner dark:border-purple-700/70 dark:from-purple-900/40 dark:via-purple-900/20 dark:to-purple-900/40"
+                >
+                  <span
+                    class="pointer-events-none absolute inset-y-0 rounded-2xl bg-gradient-to-r from-purple-500/90 via-purple-600 to-indigo-500/90 shadow-lg ring-1 ring-purple-100/80 transition-all duration-300 ease-out dark:from-purple-500/70 dark:via-purple-600/70 dark:to-indigo-500/70 dark:ring-purple-400/30"
+                    :style="apiKeyModeSliderStyle"
+                  />
+                  <button
+                    v-for="option in apiKeyModeOptions"
+                    :key="option.value"
+                    class="relative z-10 flex items-center justify-center rounded-2xl px-2 text-xs font-semibold transition-all duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-purple-500/60 dark:focus-visible:ring-purple-400/60"
+                    :class="
+                      form.apiKeyUpdateMode === option.value
+                        ? 'text-white drop-shadow-sm'
+                        : 'text-purple-500/80 hover:text-purple-700 dark:text-purple-200/70 dark:hover:text-purple-100'
+                    "
+                    type="button"
+                    @click="form.apiKeyUpdateMode = option.value"
+                  >
+                    {{ option.label }}
+                  </button>
+                </div>
+                <p class="text-xs text-purple-700 dark:text-purple-300">
+                  {{ currentApiKeyModeDescription }}
+                </p>
+              </div>
+
+              <div
+                class="rounded-lg border border-purple-200 bg-white/70 p-3 text-xs text-purple-800 dark:border-purple-700 dark:bg-purple-800/20 dark:text-purple-100"
+              >
+                <p class="font-medium"><i class="fas fa-lightbulb mr-1" />小提示</p>
+                <ul class="mt-1 list-disc space-y-1 pl-4">
+                  <li>系统会为新的 Key 自动建立粘性映射，保持同一会话命中同一个 Key。</li>
+                  <li>追加模式会保留现有 Key 并在末尾追加新的 Key。</li>
+                  <li>覆盖模式会先清空旧 Key 再写入上方的新列表。</li>
+                  <li>删除模式会根据输入精准移除指定 Key，适合快速处理失效或被封禁的 Key。</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div
             v-if="
+              !(isEdit && isEditingDroidApiKey) &&
               form.platform !== 'claude-console' &&
               form.platform !== 'ccr' &&
               form.platform !== 'bedrock' &&
@@ -2769,30 +3247,132 @@ const determinePlatformGroup = (platform) => {
     return 'openai'
   } else if (platform === 'gemini') {
     return 'gemini'
+  } else if (platform === 'droid') {
+    return 'droid'
   }
   return ''
 }
 
-// 初始化代理配置
-const initProxyConfig = () => {
-  if (props.account?.proxy && props.account.proxy.host && props.account.proxy.port) {
-    return {
-      enabled: true,
-      type: props.account.proxy.type || 'socks5',
-      host: props.account.proxy.host,
-      port: props.account.proxy.port,
-      username: props.account.proxy.username || '',
-      password: props.account.proxy.password || ''
+const createDefaultProxyState = () => ({
+  enabled: false,
+  type: 'socks5',
+  host: '',
+  port: '',
+  username: '',
+  password: ''
+})
+
+const parseProxyResponse = (rawProxy) => {
+  if (!rawProxy) {
+    return null
+  }
+
+  let proxyObject = rawProxy
+  if (typeof rawProxy === 'string') {
+    try {
+      proxyObject = JSON.parse(rawProxy)
+    } catch (error) {
+      return null
     }
   }
-  return {
-    enabled: false,
-    type: 'socks5',
-    host: '',
-    port: '',
-    username: '',
-    password: ''
+
+  if (
+    proxyObject &&
+    typeof proxyObject === 'object' &&
+    proxyObject.proxy &&
+    typeof proxyObject.proxy === 'object'
+  ) {
+    proxyObject = proxyObject.proxy
   }
+
+  if (!proxyObject || typeof proxyObject !== 'object') {
+    return null
+  }
+
+  const host =
+    typeof proxyObject.host === 'string'
+      ? proxyObject.host.trim()
+      : proxyObject.host !== undefined && proxyObject.host !== null
+        ? String(proxyObject.host).trim()
+        : ''
+
+  const port =
+    proxyObject.port !== undefined && proxyObject.port !== null
+      ? String(proxyObject.port).trim()
+      : ''
+
+  const type =
+    typeof proxyObject.type === 'string' && proxyObject.type.trim()
+      ? proxyObject.type.trim()
+      : 'socks5'
+
+  const username =
+    typeof proxyObject.username === 'string'
+      ? proxyObject.username
+      : proxyObject.username !== undefined && proxyObject.username !== null
+        ? String(proxyObject.username)
+        : ''
+
+  const password =
+    typeof proxyObject.password === 'string'
+      ? proxyObject.password
+      : proxyObject.password !== undefined && proxyObject.password !== null
+        ? String(proxyObject.password)
+        : ''
+
+  return {
+    type,
+    host,
+    port,
+    username,
+    password
+  }
+}
+
+const normalizeProxyFormState = (rawProxy) => {
+  const parsed = parseProxyResponse(rawProxy)
+
+  if (parsed && parsed.host && parsed.port) {
+    return {
+      enabled: true,
+      type: parsed.type || 'socks5',
+      host: parsed.host,
+      port: parsed.port,
+      username: parsed.username || '',
+      password: parsed.password || ''
+    }
+  }
+
+  return createDefaultProxyState()
+}
+
+const buildProxyPayload = (proxyState) => {
+  if (!proxyState || !proxyState.enabled) {
+    return null
+  }
+
+  const host = (proxyState.host || '').trim()
+  const portNumber = Number.parseInt(proxyState.port, 10)
+
+  if (!host || Number.isNaN(portNumber) || portNumber <= 0) {
+    return null
+  }
+
+  const username = proxyState.username ? proxyState.username.trim() : ''
+  const password = proxyState.password ? proxyState.password.trim() : ''
+
+  return {
+    type: proxyState.type || 'socks5',
+    host,
+    port: portNumber,
+    username: username || null,
+    password: password || null
+  }
+}
+
+// 初始化代理配置
+const initProxyConfig = () => {
+  return normalizeProxyFormState(props.account?.proxy)
 }
 
 // 表单数据
@@ -2807,6 +3387,7 @@ const form = ref({
   name: props.account?.name || '',
   description: props.account?.description || '',
   accountType: props.account?.accountType || 'shared',
+  authenticationMethod: props.account?.authenticationMethod || '',
   subscriptionType: 'claude_max', // 默认为 Claude Max，兼容旧数据
   autoStopOnWarning: props.account?.autoStopOnWarning || false, // 5小时限制自动停止调度
   useUnifiedUserAgent: props.account?.useUnifiedUserAgent || false, // 使用统一Claude Code版本
@@ -2817,11 +3398,14 @@ const form = ref({
   projectId: props.account?.projectId || '',
   accessToken: '',
   refreshToken: '',
+  apiKeysInput: '',
+  apiKeyUpdateMode: 'append',
   proxy: initProxyConfig(),
   // Claude Console 特定字段
   apiUrl: props.account?.apiUrl || '',
   apiKey: props.account?.apiKey || '',
   priority: props.account?.priority || 50,
+  endpointType: props.account?.endpointType || 'anthropic',
   // OpenAI-Responses 特定字段
   baseApi: props.account?.baseApi || '',
   rateLimitDuration: props.account?.rateLimitDuration || 60,
@@ -2854,8 +3438,44 @@ const form = ref({
   // Azure OpenAI 特定字段
   azureEndpoint: props.account?.azureEndpoint || '',
   apiVersion: props.account?.apiVersion || '',
-  deploymentName: props.account?.deploymentName || ''
+  deploymentName: props.account?.deploymentName || '',
+  // 到期时间字段
+  expireDuration: (() => {
+    // 编辑时根据expiresAt初始化expireDuration
+    if (props.account?.expiresAt) {
+      return 'custom' // 如果有过期时间，默认显示为自定义
+    }
+    return ''
+  })(),
+  customExpireDate: (() => {
+    // 编辑时根据expiresAt初始化customExpireDate
+    if (props.account?.expiresAt) {
+      // 转换ISO时间为datetime-local格式 (YYYY-MM-DDTHH:mm)
+      return new Date(props.account.expiresAt).toISOString().slice(0, 16)
+    }
+    return ''
+  })(),
+  expiresAt: props.account?.expiresAt || null
 })
+
+// 模型限制配置
+const modelRestrictionMode = ref('whitelist') // 'whitelist' 或 'mapping'
+const allowedModels = ref([
+  // 默认勾选所有 Sonnet 和 Haiku 模型
+  'claude-sonnet-4-20250514',
+  'claude-sonnet-4-5-20250929',
+  'claude-3-5-haiku-20241022'
+]) // 白名单模式下选中的模型列表
+
+// 常用模型列表
+const commonModels = [
+  { value: 'claude-sonnet-4-20250514', label: 'Claude Sonnet 4', color: 'blue' },
+  { value: 'claude-sonnet-4-5-20250929', label: 'Claude Sonnet 4.5', color: 'indigo' },
+  { value: 'claude-3-5-haiku-20241022', label: 'Claude 3.5 Haiku', color: 'green' },
+  { value: 'claude-opus-4-20250514', label: 'Claude Opus 4', color: 'purple' },
+  { value: 'claude-opus-4-1-20250805', label: 'Claude Opus 4.1', color: 'purple' },
+  { value: 'deepseek-chat', label: 'DeepSeek Chat', color: 'cyan' }
+]
 
 // 模型映射表数据
 const modelMappings = ref([])
@@ -2868,12 +3488,28 @@ const initModelMappings = () => {
       typeof props.account.supportedModels === 'object' &&
       !Array.isArray(props.account.supportedModels)
     ) {
-      modelMappings.value = Object.entries(props.account.supportedModels).map(([from, to]) => ({
-        from,
-        to
-      }))
+      const entries = Object.entries(props.account.supportedModels)
+
+      // 判断是白名单模式还是映射模式
+      // 如果所有映射都是"映射到自己"，则视为白名单模式
+      const isWhitelist = entries.every(([from, to]) => from === to)
+      if (isWhitelist) {
+        modelRestrictionMode.value = 'whitelist'
+        // 白名单模式：设置 allowedModels（显示勾选的模型）
+        allowedModels.value = entries.map(([from]) => from)
+        // 同时保留 modelMappings（以便用户切换到映射模式时有初始数据）
+        modelMappings.value = entries.map(([from, to]) => ({ from, to }))
+      } else {
+        modelRestrictionMode.value = 'mapping'
+        // 映射模式：设置 modelMappings（显示映射表）
+        modelMappings.value = entries.map(([from, to]) => ({ from, to }))
+        // 不填充 allowedModels，因为映射模式不使用白名单复选框
+      }
     } else if (Array.isArray(props.account.supportedModels)) {
-      // 如果是数组格式（旧格式），转换为映射表
+      // 如果是数组格式（旧格式），转换为白名单模式
+      modelRestrictionMode.value = 'whitelist'
+      allowedModels.value = props.account.supportedModels
+      // 同时设置 modelMappings 为自映射
       modelMappings.value = props.account.supportedModels.map((model) => ({
         from: model,
         to: model
@@ -2882,13 +3518,75 @@ const initModelMappings = () => {
   }
 }
 
+// 解析多行 API Key 输入
+const parseApiKeysInput = (input) => {
+  if (!input || typeof input !== 'string') {
+    return []
+  }
+
+  const segments = input
+    .split(/\r?\n/)
+    .map((item) => item.trim())
+    .filter((item) => item.length > 0)
+
+  if (segments.length === 0) {
+    return []
+  }
+
+  const uniqueKeys = Array.from(new Set(segments))
+  return uniqueKeys
+}
+
+const apiKeyModeOptions = [
+  {
+    value: 'append',
+    label: '追加模式',
+    description: '保留现有 Key，并在末尾追加新 Key 列表。'
+  },
+  {
+    value: 'replace',
+    label: '覆盖模式',
+    description: '先清空旧 Key，再写入上方的新 Key 列表。'
+  },
+  {
+    value: 'delete',
+    label: '删除模式',
+    description: '输入要移除的 Key，可精准删除失效或被封禁的 Key。'
+  }
+]
+
+const apiKeyModeSliderStyle = computed(() => {
+  const index = Math.max(
+    apiKeyModeOptions.findIndex((option) => option.value === form.value.apiKeyUpdateMode),
+    0
+  )
+  const widthPercent = 100 / apiKeyModeOptions.length
+
+  return {
+    width: `${widthPercent}%`,
+    left: `${index * widthPercent}%`
+  }
+})
+
+const currentApiKeyModeLabel = computed(() => {
+  const option = apiKeyModeOptions.find((item) => item.value === form.value.apiKeyUpdateMode)
+  return option ? option.label : apiKeyModeOptions[0].label
+})
+
+const currentApiKeyModeDescription = computed(() => {
+  const option = apiKeyModeOptions.find((item) => item.value === form.value.apiKeyUpdateMode)
+  return option ? option.description : apiKeyModeOptions[0].description
+})
+
 // 表单验证错误
 const errors = ref({
   name: '',
   refreshToken: '',
   accessToken: '',
+  apiKeys: '',
   apiUrl: '',
   apiKey: '',
+  baseApi: '',
   accessKeyId: '',
   secretAccessKey: '',
   region: '',
@@ -2930,6 +3628,55 @@ const usagePercentage = computed(() => {
   return (currentUsage / form.value.dailyQuota) * 100
 })
 
+// 当前账户的 API Key 数量（仅用于展示）
+const existingApiKeyCount = computed(() => {
+  if (!props.account || props.account.platform !== 'droid') {
+    return 0
+  }
+
+  let fallbackList = 0
+
+  if (Array.isArray(props.account.apiKeys)) {
+    fallbackList = props.account.apiKeys.length
+  } else if (typeof props.account.apiKeys === 'string') {
+    try {
+      const parsed = JSON.parse(props.account.apiKeys)
+      if (Array.isArray(parsed)) {
+        fallbackList = parsed.length
+      }
+    } catch (error) {
+      fallbackList = 0
+    }
+  }
+
+  const count =
+    props.account.apiKeyCount ??
+    props.account.apiKeysCount ??
+    props.account.api_key_count ??
+    fallbackList
+
+  return Number(count) || 0
+})
+
+// 编辑时判断是否为 API Key 模式的 Droid 账户
+const isEditingDroidApiKey = computed(() => {
+  if (!isEdit.value || form.value.platform !== 'droid') {
+    return false
+  }
+  const method =
+    form.value.authenticationMethod ||
+    props.account?.authenticationMethod ||
+    props.account?.authMethod ||
+    props.account?.authentication_mode ||
+    ''
+
+  if (typeof method !== 'string') {
+    return false
+  }
+
+  return method.trim().toLowerCase() === 'api_key'
+})
+
 // 加载账户今日使用情况
 const loadAccountUsage = async () => {
   if (!isEdit.value || !props.account?.id) return
@@ -2963,6 +3710,8 @@ const selectPlatformGroup = (group) => {
     form.value.platform = 'openai'
   } else if (group === 'gemini') {
     form.value.platform = 'gemini'
+  } else if (group === 'droid') {
+    form.value.platform = 'droid'
   }
 }
 
@@ -3020,17 +3769,8 @@ const nextStep = async () => {
 const generateSetupTokenAuthUrl = async () => {
   setupTokenLoading.value = true
   try {
-    const proxyConfig = form.value.proxy?.enabled
-      ? {
-          proxy: {
-            type: form.value.proxy.type,
-            host: form.value.proxy.host,
-            port: parseInt(form.value.proxy.port),
-            username: form.value.proxy.username || null,
-            password: form.value.proxy.password || null
-          }
-        }
-      : {}
+    const proxyPayload = buildProxyPayload(form.value.proxy)
+    const proxyConfig = proxyPayload ? { proxy: proxyPayload } : {}
 
     const result = await accountsStore.generateClaudeSetupTokenUrl(proxyConfig)
     setupTokenAuthUrl.value = result.authUrl
@@ -3099,14 +3839,9 @@ const exchangeSetupTokenCode = async () => {
     }
 
     // 添加代理配置（如果启用）
-    if (form.value.proxy?.enabled) {
-      data.proxy = {
-        type: form.value.proxy.type,
-        host: form.value.proxy.host,
-        port: parseInt(form.value.proxy.port),
-        username: form.value.proxy.username || null,
-        password: form.value.proxy.password || null
-      }
+    const proxyPayload = buildProxyPayload(form.value.proxy)
+    if (proxyPayload) {
+      data.proxy = proxyPayload
     }
 
     const tokenInfo = await accountsStore.exchangeClaudeSetupTokenCode(data)
@@ -3138,24 +3873,21 @@ const handleOAuthSuccess = async (tokenInfo) => {
       form.value.unifiedClientId = generateClientId()
     }
 
+    const proxyPayload = buildProxyPayload(form.value.proxy)
+
     const data = {
       name: form.value.name,
       description: form.value.description,
       accountType: form.value.accountType,
       groupId: form.value.accountType === 'group' ? form.value.groupId : undefined,
       groupIds: form.value.accountType === 'group' ? form.value.groupIds : undefined,
-      proxy: form.value.proxy.enabled
-        ? {
-            type: form.value.proxy.type,
-            host: form.value.proxy.host,
-            port: parseInt(form.value.proxy.port),
-            username: form.value.proxy.username || null,
-            password: form.value.proxy.password || null
-          }
-        : null
+      expiresAt: form.value.expiresAt || undefined,
+      proxy: proxyPayload
     }
 
-    if (form.value.platform === 'claude') {
+    const currentPlatform = form.value.platform
+
+    if (currentPlatform === 'claude') {
       // Claude使用claudeAiOauth字段
       data.claudeAiOauth = tokenInfo.claudeAiOauth || tokenInfo
       data.priority = form.value.priority || 50
@@ -3170,7 +3902,7 @@ const handleOAuthSuccess = async (tokenInfo) => {
         hasClaudePro: form.value.subscriptionType === 'claude_pro',
         manuallySet: true // 标记为手动设置
       }
-    } else if (form.value.platform === 'gemini') {
+    } else if (currentPlatform === 'gemini') {
       // Gemini使用geminiOauth字段
       data.geminiOauth = tokenInfo.tokens || tokenInfo
       if (form.value.projectId) {
@@ -3178,17 +3910,85 @@ const handleOAuthSuccess = async (tokenInfo) => {
       }
       // 添加 Gemini 优先级
       data.priority = form.value.priority || 50
-    } else if (form.value.platform === 'openai') {
+    } else if (currentPlatform === 'openai') {
       data.openaiOauth = tokenInfo.tokens || tokenInfo
       data.accountInfo = tokenInfo.accountInfo
       data.priority = form.value.priority || 50
+    } else if (currentPlatform === 'droid') {
+      const rawTokens = tokenInfo.tokens || tokenInfo || {}
+
+      const normalizedTokens = {
+        accessToken: rawTokens.accessToken || rawTokens.access_token || '',
+        refreshToken: rawTokens.refreshToken || rawTokens.refresh_token || '',
+        expiresAt: rawTokens.expiresAt || rawTokens.expires_at || '',
+        expiresIn: rawTokens.expiresIn || rawTokens.expires_in || null,
+        tokenType: rawTokens.tokenType || rawTokens.token_type || 'Bearer',
+        organizationId: rawTokens.organizationId || rawTokens.organization_id || '',
+        authenticationMethod:
+          rawTokens.authenticationMethod || rawTokens.authentication_method || ''
+      }
+
+      if (!normalizedTokens.refreshToken) {
+        loading.value = false
+        showToast('授权成功但未返回 Refresh Token，请确认已授予离线访问权限后重试。', 'error')
+        return
+      }
+
+      data.refreshToken = normalizedTokens.refreshToken
+      data.accessToken = normalizedTokens.accessToken
+      data.expiresAt = normalizedTokens.expiresAt
+      if (normalizedTokens.expiresIn !== null && normalizedTokens.expiresIn !== undefined) {
+        data.expiresIn = normalizedTokens.expiresIn
+      }
+      data.priority = form.value.priority || 50
+      data.endpointType = form.value.endpointType || 'anthropic'
+      data.platform = 'droid'
+      data.tokenType = normalizedTokens.tokenType
+      data.authenticationMethod = normalizedTokens.authenticationMethod
+
+      if (normalizedTokens.organizationId) {
+        data.organizationId = normalizedTokens.organizationId
+      }
+
+      if (rawTokens.user) {
+        const user = rawTokens.user
+        const nameParts = []
+        if (typeof user.first_name === 'string' && user.first_name.trim()) {
+          nameParts.push(user.first_name.trim())
+        }
+        if (typeof user.last_name === 'string' && user.last_name.trim()) {
+          nameParts.push(user.last_name.trim())
+        }
+        const derivedName =
+          nameParts.join(' ').trim() ||
+          (typeof user.name === 'string' ? user.name.trim() : '') ||
+          (typeof user.display_name === 'string' ? user.display_name.trim() : '')
+
+        if (typeof user.email === 'string' && user.email.trim()) {
+          data.ownerEmail = user.email.trim()
+        }
+        if (derivedName) {
+          data.ownerName = derivedName
+          data.ownerDisplayName = derivedName
+        } else if (data.ownerEmail) {
+          data.ownerName = data.ownerName || data.ownerEmail
+          data.ownerDisplayName = data.ownerDisplayName || data.ownerEmail
+        }
+        if (typeof user.id === 'string' && user.id.trim()) {
+          data.userId = user.id.trim()
+        }
+      }
     }
 
     let result
-    if (form.value.platform === 'claude') {
+    if (currentPlatform === 'claude') {
       result = await accountsStore.createClaudeAccount(data)
-    } else if (form.value.platform === 'openai') {
+    } else if (currentPlatform === 'gemini') {
+      result = await accountsStore.createGeminiAccount(data)
+    } else if (currentPlatform === 'openai') {
       result = await accountsStore.createOpenAIAccount(data)
+    } else if (currentPlatform === 'droid') {
+      result = await accountsStore.createDroidAccount(data)
     } else {
       result = await accountsStore.createGeminiAccount(data)
     }
@@ -3227,8 +4027,10 @@ const createAccount = async () => {
   // 清除之前的错误
   errors.value.name = ''
   errors.value.accessToken = ''
+  errors.value.refreshToken = ''
   errors.value.apiUrl = ''
   errors.value.apiKey = ''
+  errors.value.apiKeys = ''
 
   let hasError = false
 
@@ -3314,6 +4116,15 @@ const createAccount = async () => {
         errors.value.accessToken = '请填写 Access Token'
         hasError = true
       }
+    } else if (form.value.platform === 'droid') {
+      if (!form.value.accessToken || form.value.accessToken.trim() === '') {
+        errors.value.accessToken = '请填写 Access Token'
+        hasError = true
+      }
+      if (!form.value.refreshToken || form.value.refreshToken.trim() === '') {
+        errors.value.refreshToken = '请填写 Refresh Token'
+        hasError = true
+      }
     } else if (form.value.platform === 'claude') {
       // Claude 平台需要 Access Token
       if (!form.value.accessToken || form.value.accessToken.trim() === '') {
@@ -3322,6 +4133,12 @@ const createAccount = async () => {
       }
     }
     // Claude Console、CCR、OpenAI-Responses 等其他平台不需要 Token 验证
+  } else if (form.value.addType === 'apikey') {
+    const apiKeys = parseApiKeysInput(form.value.apiKeysInput)
+    if (apiKeys.length === 0) {
+      errors.value.apiKeys = '请至少填写一个 API Key'
+      hasError = true
+    }
   }
 
   // 分组类型验证 - 创建账户流程修复
@@ -3348,21 +4165,16 @@ const createAccount = async () => {
 
   loading.value = true
   try {
+    const proxyPayload = buildProxyPayload(form.value.proxy)
+
     const data = {
       name: form.value.name,
       description: form.value.description,
       accountType: form.value.accountType,
       groupId: form.value.accountType === 'group' ? form.value.groupId : undefined,
       groupIds: form.value.accountType === 'group' ? form.value.groupIds : undefined,
-      proxy: form.value.proxy.enabled
-        ? {
-            type: form.value.proxy.type,
-            host: form.value.proxy.host,
-            port: parseInt(form.value.proxy.port),
-            username: form.value.proxy.username || null,
-            password: form.value.proxy.password || null
-          }
-        : null
+      expiresAt: form.value.expiresAt || undefined,
+      proxy: proxyPayload
     }
 
     if (form.value.platform === 'claude') {
@@ -3443,6 +4255,29 @@ const createAccount = async () => {
       data.needsImmediateRefresh = true
       data.requireRefreshSuccess = true // 必须刷新成功才能创建账户
       data.priority = form.value.priority || 50
+    } else if (form.value.platform === 'droid') {
+      data.priority = form.value.priority || 50
+      data.endpointType = form.value.endpointType || 'anthropic'
+      data.platform = 'droid'
+
+      if (form.value.addType === 'apikey') {
+        const apiKeys = parseApiKeysInput(form.value.apiKeysInput)
+        data.apiKeys = apiKeys
+        data.authenticationMethod = 'api_key'
+        data.isActive = true
+        data.schedulable = true
+      } else {
+        const accessToken = form.value.accessToken?.trim() || ''
+        const refreshToken = form.value.refreshToken?.trim() || ''
+        const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString()
+
+        data.accessToken = accessToken
+        data.refreshToken = refreshToken
+        data.expiresAt = expiresAt
+        data.expiresIn = 8 * 60 * 60
+        data.tokenType = 'Bearer'
+        data.authenticationMethod = 'manual'
+      }
     } else if (form.value.platform === 'claude-console' || form.value.platform === 'ccr') {
       // Claude Console 和 CCR 账户特定数据（CCR 使用 Claude Console 的后端逻辑）
       data.apiUrl = form.value.apiUrl
@@ -3497,6 +4332,8 @@ const createAccount = async () => {
     } else if (form.value.platform === 'claude-console' || form.value.platform === 'ccr') {
       // CCR 使用 Claude Console 的后端 API
       result = await accountsStore.createClaudeConsoleAccount(data)
+    } else if (form.value.platform === 'droid') {
+      result = await accountsStore.createDroidAccount(data)
     } else if (form.value.platform === 'openai-responses') {
       result = await accountsStore.createOpenAIResponsesAccount(data)
     } else if (form.value.platform === 'bedrock') {
@@ -3544,6 +4381,7 @@ const createAccount = async () => {
 const updateAccount = async () => {
   // 清除之前的错误
   errors.value.name = ''
+  errors.value.apiKeys = ''
 
   // 验证账户名称
   if (!form.value.name || form.value.name.trim() === '') {
@@ -3587,25 +4425,23 @@ const updateAccount = async () => {
 
   loading.value = true
   try {
+    const proxyPayload = buildProxyPayload(form.value.proxy)
+
     const data = {
       name: form.value.name,
       description: form.value.description,
       accountType: form.value.accountType,
       groupId: form.value.accountType === 'group' ? form.value.groupId : undefined,
       groupIds: form.value.accountType === 'group' ? form.value.groupIds : undefined,
-      proxy: form.value.proxy.enabled
-        ? {
-            type: form.value.proxy.type,
-            host: form.value.proxy.host,
-            port: parseInt(form.value.proxy.port),
-            username: form.value.proxy.username || null,
-            password: form.value.proxy.password || null
-          }
-        : null
+      expiresAt: form.value.expiresAt || undefined,
+      proxy: proxyPayload
     }
 
     // 只有非空时才更新token
     if (form.value.accessToken || form.value.refreshToken) {
+      const trimmedAccessToken = form.value.accessToken?.trim() || ''
+      const trimmedRefreshToken = form.value.refreshToken?.trim() || ''
+
       if (props.account.platform === 'claude') {
         // Claude需要构建claudeAiOauth对象
         const expiresInMs = form.value.refreshToken
@@ -3613,8 +4449,8 @@ const updateAccount = async () => {
           : 365 * 24 * 60 * 60 * 1000 // 1年
 
         data.claudeAiOauth = {
-          accessToken: form.value.accessToken || '',
-          refreshToken: form.value.refreshToken || '',
+          accessToken: trimmedAccessToken || '',
+          refreshToken: trimmedRefreshToken || '',
           expiresAt: Date.now() + expiresInMs,
           scopes: props.account.scopes || [] // 保持原有的 scopes，如果没有则为空数组
         }
@@ -3625,8 +4461,8 @@ const updateAccount = async () => {
           : 365 * 24 * 60 * 60 * 1000 // 1年
 
         data.geminiOauth = {
-          access_token: form.value.accessToken || '',
-          refresh_token: form.value.refreshToken || '',
+          access_token: trimmedAccessToken || '',
+          refresh_token: trimmedRefreshToken || '',
           scope: 'https://www.googleapis.com/auth/cloud-platform',
           token_type: 'Bearer',
           expiry_date: Date.now() + expiresInMs
@@ -3639,21 +4475,76 @@ const updateAccount = async () => {
 
         data.openaiOauth = {
           idToken: '', // 不需要用户输入
-          accessToken: form.value.accessToken || '',
-          refreshToken: form.value.refreshToken || '',
+          accessToken: trimmedAccessToken || '',
+          refreshToken: trimmedRefreshToken || '',
           expires_in: Math.floor(expiresInMs / 1000) // 转换为秒
         }
 
         // 编辑 OpenAI 账户时，如果更新了 Refresh Token，也需要验证
-        if (form.value.refreshToken && form.value.refreshToken !== props.account.refreshToken) {
+        if (trimmedRefreshToken && trimmedRefreshToken !== props.account.refreshToken) {
           data.needsImmediateRefresh = true
           data.requireRefreshSuccess = true
         }
+      } else if (props.account.platform === 'droid') {
+        if (trimmedAccessToken) {
+          data.accessToken = trimmedAccessToken
+        }
+        if (trimmedRefreshToken) {
+          data.refreshToken = trimmedRefreshToken
+        }
+      }
+    }
+
+    if (props.account.platform === 'droid') {
+      const trimmedApiKeysInput = form.value.apiKeysInput?.trim() || ''
+      const apiKeyUpdateMode = form.value.apiKeyUpdateMode || 'append'
+
+      if (apiKeyUpdateMode === 'delete') {
+        if (!trimmedApiKeysInput) {
+          errors.value.apiKeys = '请填写需要删除的 API Key'
+          loading.value = false
+          return
+        }
+
+        const removeApiKeys = parseApiKeysInput(trimmedApiKeysInput)
+        if (removeApiKeys.length === 0) {
+          errors.value.apiKeys = '请填写需要删除的 API Key'
+          loading.value = false
+          return
+        }
+
+        data.removeApiKeys = removeApiKeys
+        data.apiKeyUpdateMode = 'delete'
+      } else {
+        if (trimmedApiKeysInput) {
+          const apiKeys = parseApiKeysInput(trimmedApiKeysInput)
+          if (apiKeys.length === 0) {
+            errors.value.apiKeys = '请至少填写一个 API Key'
+            loading.value = false
+            return
+          }
+          data.apiKeys = apiKeys
+        } else if (apiKeyUpdateMode === 'replace') {
+          data.apiKeys = []
+        }
+
+        if (apiKeyUpdateMode !== 'append' || trimmedApiKeysInput) {
+          data.apiKeyUpdateMode = apiKeyUpdateMode
+        }
+      }
+
+      if (isEditingDroidApiKey.value) {
+        data.authenticationMethod = 'api_key'
       }
     }
 
     if (props.account.platform === 'gemini') {
       data.projectId = form.value.projectId || ''
+    }
+
+    if (props.account.platform === 'droid') {
+      data.priority = form.value.priority || 50
+      data.endpointType = form.value.endpointType || 'anthropic'
     }
 
     // Claude 官方账号优先级和订阅类型更新
@@ -3771,6 +4662,8 @@ const updateAccount = async () => {
       await accountsStore.updateAzureOpenAIAccount(props.account.id, data)
     } else if (props.account.platform === 'gemini') {
       await accountsStore.updateGeminiAccount(props.account.id, data)
+    } else if (props.account.platform === 'droid') {
+      await accountsStore.updateDroidAccount(props.account.id, data)
     } else {
       throw new Error(`不支持的平台: ${props.account.platform}`)
     }
@@ -3820,6 +4713,16 @@ watch(
   () => {
     if (errors.value.accessToken && form.value.accessToken?.trim()) {
       errors.value.accessToken = ''
+    }
+  }
+)
+
+// 监听Refresh Token变化，清除错误
+watch(
+  () => form.value.refreshToken,
+  () => {
+    if (errors.value.refreshToken && form.value.refreshToken?.trim()) {
+      errors.value.refreshToken = ''
     }
   }
 )
@@ -3961,6 +4864,77 @@ watch(
   { deep: true }
 )
 
+// 监听添加方式切换，确保字段状态同步
+watch(
+  () => form.value.addType,
+  (newType, oldType) => {
+    if (newType === oldType) {
+      return
+    }
+
+    if (newType === 'apikey') {
+      // 切换到 API Key 模式时清理 Token 字段
+      form.value.accessToken = ''
+      form.value.refreshToken = ''
+      errors.value.accessToken = ''
+      errors.value.refreshToken = ''
+      form.value.authenticationMethod = 'api_key'
+      form.value.apiKeyUpdateMode = 'append'
+    } else if (oldType === 'apikey') {
+      // 切换离开 API Key 模式时重置 API Key 输入
+      form.value.apiKeysInput = ''
+      form.value.apiKeyUpdateMode = 'append'
+      errors.value.apiKeys = ''
+      if (!isEdit.value) {
+        form.value.authenticationMethod = ''
+      }
+    }
+  }
+)
+
+// 监听 API Key 更新模式切换，自动清理提示
+watch(
+  () => form.value.apiKeyUpdateMode,
+  (newMode, oldMode) => {
+    if (newMode === oldMode) {
+      return
+    }
+
+    if (errors.value.apiKeys) {
+      errors.value.apiKeys = ''
+    }
+  }
+)
+
+// 监听 API Key 输入，自动清理错误提示
+watch(
+  () => form.value.apiKeysInput,
+  (newValue) => {
+    if (!errors.value.apiKeys) {
+      return
+    }
+
+    const parsed = parseApiKeysInput(newValue)
+    const mode = form.value.apiKeyUpdateMode
+
+    if (mode === 'append' && parsed.length > 0) {
+      errors.value.apiKeys = ''
+      return
+    }
+
+    if (mode === 'replace') {
+      if (parsed.length > 0 || !newValue || newValue.trim() === '') {
+        errors.value.apiKeys = ''
+      }
+      return
+    }
+
+    if (mode === 'delete' && parsed.length > 0) {
+      errors.value.apiKeys = ''
+    }
+  }
+)
+
 // 监听Setup Token授权码输入，自动提取URL中的code参数
 watch(setupTokenAuthCode, (newValue) => {
   if (!newValue || typeof newValue !== 'string') return
@@ -4062,14 +5036,24 @@ const addPresetMapping = (from, to) => {
   showToast(`已添加映射: ${from} → ${to}`, 'success')
 }
 
-// 将模型映射表转换为对象格式
+// 将模型映射表转换为对象格式（根据当前模式）
 const convertMappingsToObject = () => {
   const mapping = {}
-  modelMappings.value.forEach((item) => {
-    if (item.from && item.to) {
-      mapping[item.from] = item.to
-    }
-  })
+
+  if (modelRestrictionMode.value === 'whitelist') {
+    // 白名单模式：将选中的模型映射到自己
+    allowedModels.value.forEach((model) => {
+      mapping[model] = model
+    })
+  } else {
+    // 映射模式：使用手动配置的映射表
+    modelMappings.value.forEach((item) => {
+      if (item.from && item.to) {
+        mapping[item.from] = item.to
+      }
+    })
+  }
+
   return Object.keys(mapping).length > 0 ? mapping : null
 }
 
@@ -4080,24 +5064,17 @@ watch(
     if (newAccount) {
       initModelMappings()
       // 重新初始化代理配置
-      const proxyConfig =
-        newAccount.proxy && newAccount.proxy.host && newAccount.proxy.port
-          ? {
-              enabled: true,
-              type: newAccount.proxy.type || 'socks5',
-              host: newAccount.proxy.host,
-              port: newAccount.proxy.port,
-              username: newAccount.proxy.username || '',
-              password: newAccount.proxy.password || ''
-            }
-          : {
-              enabled: false,
-              type: 'socks5',
-              host: '',
-              port: '',
-              username: '',
-              password: ''
-            }
+      const proxyConfig = normalizeProxyFormState(newAccount.proxy)
+      const normalizedAuthMethod =
+        typeof newAccount.authenticationMethod === 'string'
+          ? newAccount.authenticationMethod.trim().toLowerCase()
+          : ''
+      const derivedAddType =
+        normalizedAuthMethod === 'api_key'
+          ? 'apikey'
+          : normalizedAuthMethod === 'manual'
+            ? 'manual'
+            : 'oauth'
 
       // 获取分组ID - 可能来自 groupId 字段或 groupInfo 对象
       let groupId = ''
@@ -4126,7 +5103,7 @@ watch(
 
       form.value = {
         platform: newAccount.platform,
-        addType: 'oauth',
+        addType: derivedAddType,
         name: newAccount.name,
         description: newAccount.description || '',
         accountType: newAccount.accountType || 'shared',
@@ -4140,6 +5117,9 @@ watch(
         projectId: newAccount.projectId || '',
         accessToken: '',
         refreshToken: '',
+        authenticationMethod: newAccount.authenticationMethod || '',
+        apiKeysInput: '',
+        apiKeyUpdateMode: 'append',
         proxy: proxyConfig,
         // Claude Console 特定字段
         apiUrl: newAccount.apiUrl || '',
@@ -4297,10 +5277,70 @@ const handleUnifiedClientIdChange = () => {
   }
 }
 
+// 到期时间相关方法
+// 计算最小日期时间
+const minDateTime = computed(() => {
+  const now = new Date()
+  now.setMinutes(now.getMinutes() + 1)
+  return now.toISOString().slice(0, 16)
+})
+
+// 更新账户过期时间
+const updateAccountExpireAt = () => {
+  if (!form.value.expireDuration) {
+    form.value.expiresAt = null
+    return
+  }
+
+  if (form.value.expireDuration === 'custom') {
+    return
+  }
+
+  const now = new Date()
+  const duration = form.value.expireDuration
+  const match = duration.match(/(\d+)([d])/)
+
+  if (match) {
+    const [, value, unit] = match
+    const num = parseInt(value)
+
+    if (unit === 'd') {
+      now.setDate(now.getDate() + num)
+    }
+
+    form.value.expiresAt = now.toISOString()
+  }
+}
+
+// 更新自定义过期时间
+const updateAccountCustomExpireAt = () => {
+  if (form.value.customExpireDate) {
+    form.value.expiresAt = new Date(form.value.customExpireDate).toISOString()
+  }
+}
+
+// 格式化过期日期
+const formatExpireDate = (dateString) => {
+  if (!dateString) return ''
+  const date = new Date(dateString)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
 // 组件挂载时获取统一 User-Agent 信息
 onMounted(() => {
   // 初始化平台分组
   platformGroup.value = determinePlatformGroup(form.value.platform)
+
+  // 初始化模型映射表（如果是编辑模式）
+  if (isEdit.value) {
+    initModelMappings()
+  }
 
   // 获取Claude Code统一User-Agent信息
   fetchUnifiedUserAgent()

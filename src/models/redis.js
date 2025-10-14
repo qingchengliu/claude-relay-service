@@ -858,7 +858,9 @@ class RedisClient {
 
     // 获取账户创建时间来计算平均值 - 支持不同类型的账号
     let accountData = {}
-    if (accountType === 'openai') {
+    if (accountType === 'droid') {
+      accountData = await this.client.hgetall(`droid:account:${accountId}`)
+    } else if (accountType === 'openai') {
       accountData = await this.client.hgetall(`openai:account:${accountId}`)
     } else if (accountType === 'openai-responses') {
       accountData = await this.client.hgetall(`openai_responses_account:${accountId}`)
@@ -873,6 +875,9 @@ class RedisClient {
       }
       if (!accountData.createdAt) {
         accountData = await this.client.hgetall(`openai_account:${accountId}`)
+      }
+      if (!accountData.createdAt) {
+        accountData = await this.client.hgetall(`droid:account:${accountId}`)
       }
     }
     const createdAt = accountData.createdAt ? new Date(accountData.createdAt) : new Date()
@@ -1066,6 +1071,35 @@ class RedisClient {
     const key = `claude:account:${accountId}`
     return await this.client.del(key)
   }
+
+  // 🤖 Droid 账户相关操作
+  async setDroidAccount(accountId, accountData) {
+    const key = `droid:account:${accountId}`
+    await this.client.hset(key, accountData)
+  }
+
+  async getDroidAccount(accountId) {
+    const key = `droid:account:${accountId}`
+    return await this.client.hgetall(key)
+  }
+
+  async getAllDroidAccounts() {
+    const keys = await this.client.keys('droid:account:*')
+    const accounts = []
+    for (const key of keys) {
+      const accountData = await this.client.hgetall(key)
+      if (accountData && Object.keys(accountData).length > 0) {
+        accounts.push({ id: key.replace('droid:account:', ''), ...accountData })
+      }
+    }
+    return accounts
+  }
+
+  async deleteDroidAccount(accountId) {
+    const key = `droid:account:${accountId}`
+    return await this.client.del(key)
+  }
+
   async setOpenAiAccount(accountId, accountData) {
     const key = `openai:account:${accountId}`
     await this.client.hset(key, accountData)
@@ -1541,12 +1575,52 @@ class RedisClient {
   // 获取并发配置
   _getConcurrencyConfig() {
     const defaults = {
-      leaseSeconds: 900,
+      leaseSeconds: 300,
+      renewIntervalSeconds: 30,
       cleanupGraceSeconds: 30
     }
-    return {
+
+    const configValues = {
       ...defaults,
       ...(config.concurrency || {})
+    }
+
+    const normalizeNumber = (value, fallback, options = {}) => {
+      const parsed = Number(value)
+      if (!Number.isFinite(parsed)) {
+        return fallback
+      }
+
+      if (options.allowZero && parsed === 0) {
+        return 0
+      }
+
+      if (options.min !== undefined && parsed < options.min) {
+        return options.min
+      }
+
+      return parsed
+    }
+
+    return {
+      leaseSeconds: normalizeNumber(configValues.leaseSeconds, defaults.leaseSeconds, {
+        min: 30
+      }),
+      renewIntervalSeconds: normalizeNumber(
+        configValues.renewIntervalSeconds,
+        defaults.renewIntervalSeconds,
+        {
+          allowZero: true,
+          min: 0
+        }
+      ),
+      cleanupGraceSeconds: normalizeNumber(
+        configValues.cleanupGraceSeconds,
+        defaults.cleanupGraceSeconds,
+        {
+          min: 0
+        }
+      )
     }
   }
 
@@ -1616,9 +1690,9 @@ class RedisClient {
         local now = tonumber(ARGV[3])
         local ttl = tonumber(ARGV[4])
 
-        local exists = redis.call('ZSCORE', key, member)
-
         redis.call('ZREMRANGEBYSCORE', key, '-inf', now)
+
+        local exists = redis.call('ZSCORE', key, member)
 
         if exists then
           redis.call('ZADD', key, expireAt, member)

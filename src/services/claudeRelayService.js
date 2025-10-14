@@ -38,18 +38,60 @@ class ClaudeRelayService {
     return `此专属账号的Opus模型已达到周使用限制，将于 ${formattedReset} 自动恢复，请尝试切换其他模型后再试。`
   }
 
-  // 🔍 判断是否是真实的 Claude Code 请求
-  isRealClaudeCodeRequest(requestBody, clientHeaders) {
-    // 使用 claudeCodeValidator 来进行完整的验证
-    // 注意：claudeCodeValidator.validate() 需要一个完整的 req 对象
-    // 我们需要构造一个最小化的 req 对象来满足验证器的需求
-    const mockReq = {
-      headers: clientHeaders || {},
-      body: requestBody,
-      path: '/api/v1/messages'
+  // 🧾 提取错误消息文本
+  _extractErrorMessage(body) {
+    if (!body) {
+      return ''
     }
 
-    return ClaudeCodeValidator.validate(mockReq)
+    if (typeof body === 'string') {
+      const trimmed = body.trim()
+      if (!trimmed) {
+        return ''
+      }
+      try {
+        const parsed = JSON.parse(trimmed)
+        return this._extractErrorMessage(parsed)
+      } catch (error) {
+        return trimmed
+      }
+    }
+
+    if (typeof body === 'object') {
+      if (typeof body.error === 'string') {
+        return body.error
+      }
+      if (body.error && typeof body.error === 'object') {
+        if (typeof body.error.message === 'string') {
+          return body.error.message
+        }
+        if (typeof body.error.error === 'string') {
+          return body.error.error
+        }
+      }
+      if (typeof body.message === 'string') {
+        return body.message
+      }
+    }
+
+    return ''
+  }
+
+  // 🚫 检查是否为组织被禁用错误
+  _isOrganizationDisabledError(statusCode, body) {
+    if (statusCode !== 400) {
+      return false
+    }
+    const message = this._extractErrorMessage(body)
+    if (!message) {
+      return false
+    }
+    return message.toLowerCase().includes('this organization has been disabled')
+  }
+
+  // 🔍 判断是否是真实的 Claude Code 请求
+  isRealClaudeCodeRequest(requestBody) {
+    return ClaudeCodeValidator.includesClaudeCodeSystemPrompt(requestBody, 1)
   }
 
   // 🚀 转发请求到Claude API
@@ -151,8 +193,7 @@ class ClaudeRelayService {
       // 获取有效的访问token
       const accessToken = await claudeAccountService.getValidAccessToken(accountId)
 
-      // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
-      const processedBody = this._processRequestBody(requestBody, clientHeaders, account)
+      const processedBody = this._processRequestBody(requestBody, account)
 
       // 获取代理配置
       const proxyAgent = await this._getProxyAgent(accountId)
@@ -199,6 +240,10 @@ class ClaudeRelayService {
         let isRateLimited = false
         let rateLimitResetTimestamp = null
         let dedicatedRateLimitMessage = null
+        const organizationDisabledError = this._isOrganizationDisabledError(
+          response.statusCode,
+          response.body
+        )
 
         // 检查是否为401状态码（未授权）
         if (response.statusCode === 401) {
@@ -228,6 +273,13 @@ class ClaudeRelayService {
         else if (response.statusCode === 403) {
           logger.error(
             `🚫 Forbidden error (403) detected for account ${accountId}, marking as blocked`
+          )
+          await unifiedClaudeScheduler.markAccountBlocked(accountId, accountType, sessionHash)
+        }
+        // 检查是否返回组织被禁用错误（400状态码）
+        else if (organizationDisabledError) {
+          logger.error(
+            `🚫 Organization disabled error (400) detected for account ${accountId}, marking as blocked`
           )
           await unifiedClaudeScheduler.markAccountBlocked(accountId, accountType, sessionHash)
         }
@@ -397,7 +449,7 @@ class ClaudeRelayService {
         if (
           clientHeaders &&
           Object.keys(clientHeaders).length > 0 &&
-          this.isRealClaudeCodeRequest(requestBody, clientHeaders)
+          this.isRealClaudeCodeRequest(requestBody)
         ) {
           await claudeCodeHeadersService.storeAccountHeaders(accountId, clientHeaders)
         }
@@ -444,7 +496,7 @@ class ClaudeRelayService {
   }
 
   // 🔄 处理请求体
-  _processRequestBody(body, clientHeaders = {}, account = null) {
+  _processRequestBody(body, account = null) {
     if (!body) {
       return body
     }
@@ -459,7 +511,7 @@ class ClaudeRelayService {
     this._stripTtlFromCacheControl(processedBody)
 
     // 判断是否是真实的 Claude Code 请求
-    const isRealClaudeCode = this.isRealClaudeCodeRequest(processedBody, clientHeaders)
+    const isRealClaudeCode = this.isRealClaudeCodeRequest(processedBody)
 
     // 如果不是真实的 Claude Code 请求，需要设置 Claude Code 系统提示词
     if (!isRealClaudeCode) {
@@ -508,6 +560,8 @@ class ClaudeRelayService {
         processedBody.system = [claudeCodePrompt]
       }
     }
+
+    this._enforceCacheControlLimit(processedBody)
 
     // 处理原有的系统提示（如果配置了）
     if (this.systemPrompt && this.systemPrompt.trim()) {
@@ -655,6 +709,107 @@ class ClaudeRelayService {
     }
   }
 
+  // ⚖️ 限制带缓存控制的内容数量
+  _enforceCacheControlLimit(body) {
+    const MAX_CACHE_CONTROL_BLOCKS = 4
+
+    if (!body || typeof body !== 'object') {
+      return
+    }
+
+    const countCacheControlBlocks = () => {
+      let total = 0
+
+      if (Array.isArray(body.messages)) {
+        body.messages.forEach((message) => {
+          if (!message || !Array.isArray(message.content)) {
+            return
+          }
+          message.content.forEach((item) => {
+            if (item && item.cache_control) {
+              total += 1
+            }
+          })
+        })
+      }
+
+      if (Array.isArray(body.system)) {
+        body.system.forEach((item) => {
+          if (item && item.cache_control) {
+            total += 1
+          }
+        })
+      }
+
+      return total
+    }
+
+    const removeFromMessages = () => {
+      if (!Array.isArray(body.messages)) {
+        return false
+      }
+
+      for (let messageIndex = 0; messageIndex < body.messages.length; messageIndex += 1) {
+        const message = body.messages[messageIndex]
+        if (!message || !Array.isArray(message.content)) {
+          continue
+        }
+
+        for (let contentIndex = 0; contentIndex < message.content.length; contentIndex += 1) {
+          const contentItem = message.content[contentIndex]
+          if (contentItem && contentItem.cache_control) {
+            message.content.splice(contentIndex, 1)
+
+            if (message.content.length === 0) {
+              body.messages.splice(messageIndex, 1)
+            }
+
+            return true
+          }
+        }
+      }
+
+      return false
+    }
+
+    const removeFromSystem = () => {
+      if (!Array.isArray(body.system)) {
+        return false
+      }
+
+      for (let index = 0; index < body.system.length; index += 1) {
+        const systemItem = body.system[index]
+        if (systemItem && systemItem.cache_control) {
+          body.system.splice(index, 1)
+
+          if (body.system.length === 0) {
+            delete body.system
+          }
+
+          return true
+        }
+      }
+
+      return false
+    }
+
+    let total = countCacheControlBlocks()
+
+    while (total > MAX_CACHE_CONTROL_BLOCKS) {
+      if (removeFromMessages()) {
+        total -= 1
+        continue
+      }
+
+      if (removeFromSystem()) {
+        total -= 1
+        continue
+      }
+
+      break
+    }
+  }
+
   // 🌐 获取代理Agent（使用统一的代理工具）
   async _getProxyAgent(accountId) {
     try {
@@ -760,7 +915,7 @@ class ClaudeRelayService {
     const filteredHeaders = this._filterClientHeaders(clientHeaders)
 
     // 判断是否是真实的 Claude Code 请求
-    const isRealClaudeCode = this.isRealClaudeCodeRequest(body, clientHeaders)
+    const isRealClaudeCode = this.isRealClaudeCodeRequest(body)
 
     // 如果不是真实的 Claude Code 请求，需要使用从账户获取的 Claude Code headers
     const finalHeaders = { ...filteredHeaders }
@@ -1007,8 +1162,7 @@ class ClaudeRelayService {
       // 获取有效的访问token
       const accessToken = await claudeAccountService.getValidAccessToken(accountId)
 
-      // 处理请求体（传递 clientHeaders 以判断是否需要设置 Claude Code 系统提示词）
-      const processedBody = this._processRequestBody(requestBody, clientHeaders, account)
+      const processedBody = this._processRequestBody(requestBody, account)
 
       // 获取代理配置
       const proxyAgent = await this._getProxyAgent(accountId)
@@ -1065,7 +1219,7 @@ class ClaudeRelayService {
     const filteredHeaders = this._filterClientHeaders(clientHeaders)
 
     // 判断是否是真实的 Claude Code 请求
-    const isRealClaudeCode = this.isRealClaudeCodeRequest(body, clientHeaders)
+    const isRealClaudeCode = this.isRealClaudeCodeRequest(body)
 
     // 如果不是真实的 Claude Code 请求，需要使用从账户获取的 Claude Code headers
     const finalHeaders = { ...filteredHeaders }
@@ -1264,6 +1418,25 @@ class ClaudeRelayService {
               `❌ Claude API error response (Account: ${account?.name || accountId}):`,
               errorData
             )
+            if (this._isOrganizationDisabledError(res.statusCode, errorData)) {
+              ;(async () => {
+                try {
+                  logger.error(
+                    `🚫 [Stream] Organization disabled error (400) detected for account ${accountId}, marking as blocked`
+                  )
+                  await unifiedClaudeScheduler.markAccountBlocked(
+                    accountId,
+                    accountType,
+                    sessionHash
+                  )
+                } catch (markError) {
+                  logger.error(
+                    `❌ [Stream] Failed to mark account ${accountId} as blocked after organization disabled error:`,
+                    markError
+                  )
+                }
+              })()
+            }
             if (!responseStream.destroyed) {
               // 发送错误事件
               responseStream.write('event: error\n')
@@ -1315,9 +1488,12 @@ class ClaudeRelayService {
 
             for (const line of lines) {
               // 解析SSE数据寻找usage信息
-              if (line.startsWith('data: ') && line.length > 6) {
+              if (line.startsWith('data:')) {
+                const jsonStr = line.slice(5).trimStart()
+                if (!jsonStr || jsonStr === '[DONE]') {
+                  continue
+                }
                 try {
-                  const jsonStr = line.slice(6)
                   const data = JSON.parse(jsonStr)
 
                   // 收集来自不同事件的usage数据
@@ -1646,7 +1822,7 @@ class ClaudeRelayService {
             if (
               clientHeaders &&
               Object.keys(clientHeaders).length > 0 &&
-              this.isRealClaudeCodeRequest(body, clientHeaders)
+              this.isRealClaudeCodeRequest(body)
             ) {
               await claudeCodeHeadersService.storeAccountHeaders(accountId, clientHeaders)
             }

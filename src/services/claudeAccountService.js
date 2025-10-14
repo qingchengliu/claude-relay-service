@@ -73,7 +73,8 @@ class ClaudeAccountService {
       autoStopOnWarning = false, // 5小时使用量接近限制时自动停止调度
       useUnifiedUserAgent = false, // 是否使用统一Claude Code版本的User-Agent
       useUnifiedClientId = false, // 是否使用统一的客户端标识
-      unifiedClientId = '' // 统一的客户端标识
+      unifiedClientId = '', // 统一的客户端标识
+      expiresAt = null // 账户订阅到期时间
     } = options
 
     const accountId = uuidv4()
@@ -113,7 +114,9 @@ class ClaudeAccountService {
           ? JSON.stringify(subscriptionInfo)
           : claudeAiOauth.subscriptionInfo
             ? JSON.stringify(claudeAiOauth.subscriptionInfo)
-            : ''
+            : '',
+        // 账户订阅到期时间
+        subscriptionExpiresAt: expiresAt || ''
       }
     } else {
       // 兼容旧格式
@@ -141,7 +144,9 @@ class ClaudeAccountService {
         autoStopOnWarning: autoStopOnWarning.toString(), // 5小时使用量接近限制时自动停止调度
         useUnifiedUserAgent: useUnifiedUserAgent.toString(), // 是否使用统一Claude Code版本的User-Agent
         // 手动设置的订阅信息
-        subscriptionInfo: subscriptionInfo ? JSON.stringify(subscriptionInfo) : ''
+        subscriptionInfo: subscriptionInfo ? JSON.stringify(subscriptionInfo) : '',
+        // 账户订阅到期时间
+        subscriptionExpiresAt: expiresAt || ''
       }
     }
 
@@ -180,6 +185,10 @@ class ClaudeAccountService {
       status: accountData.status,
       createdAt: accountData.createdAt,
       expiresAt: accountData.expiresAt,
+      subscriptionExpiresAt:
+        accountData.subscriptionExpiresAt && accountData.subscriptionExpiresAt !== ''
+          ? accountData.subscriptionExpiresAt
+          : null,
       scopes: claudeAiOauth ? claudeAiOauth.scopes : [],
       autoStopOnWarning,
       useUnifiedUserAgent,
@@ -486,7 +495,11 @@ class ClaudeAccountService {
             createdAt: account.createdAt,
             lastUsedAt: account.lastUsedAt,
             lastRefreshAt: account.lastRefreshAt,
-            expiresAt: account.expiresAt,
+            expiresAt: account.expiresAt || null,
+            subscriptionExpiresAt:
+              account.subscriptionExpiresAt && account.subscriptionExpiresAt !== ''
+                ? account.subscriptionExpiresAt
+                : null,
             // 添加 scopes 字段用于判断认证方式
             // 处理空字符串的情况，避免返回 ['']
             scopes: account.scopes && account.scopes.trim() ? account.scopes.split(' ') : [],
@@ -618,7 +631,8 @@ class ClaudeAccountService {
         'autoStopOnWarning',
         'useUnifiedUserAgent',
         'useUnifiedClientId',
-        'unifiedClientId'
+        'unifiedClientId',
+        'subscriptionExpiresAt'
       ]
       const updatedData = { ...accountData }
       let shouldClearAutoStopFields = false
@@ -637,6 +651,9 @@ class ClaudeAccountService {
           } else if (field === 'subscriptionInfo') {
             // 处理订阅信息更新
             updatedData[field] = typeof value === 'string' ? value : JSON.stringify(value)
+          } else if (field === 'subscriptionExpiresAt') {
+            // 处理订阅到期时间，允许 null 值（永不过期）
+            updatedData[field] = value ? value.toString() : ''
           } else if (field === 'claudeAiOauth') {
             // 更新 Claude AI OAuth 数据
             if (value) {
@@ -650,7 +667,7 @@ class ClaudeAccountService {
               updatedData.lastRefreshAt = new Date().toISOString()
             }
           } else {
-            updatedData[field] = value.toString()
+            updatedData[field] = value !== null && value !== undefined ? value.toString() : ''
           }
         }
       }
@@ -769,6 +786,29 @@ class ClaudeAccountService {
     }
   }
 
+  /**
+   * 检查账户是否未过期
+   * @param {Object} account - 账户对象
+   * @returns {boolean} - 如果未设置过期时间或未过期返回 true
+   */
+  isAccountNotExpired(account) {
+    if (!account.subscriptionExpiresAt) {
+      return true // 未设置过期时间，视为永不过期
+    }
+
+    const expiryDate = new Date(account.subscriptionExpiresAt)
+    const now = new Date()
+
+    if (expiryDate <= now) {
+      logger.debug(
+        `⏰ Account ${account.name} (${account.id}) expired at ${account.subscriptionExpiresAt}`
+      )
+      return false
+    }
+
+    return true
+  }
+
   // 🎯 智能选择可用账户（支持sticky会话和模型过滤）
   async selectAvailableAccount(sessionHash = null, modelName = null) {
     try {
@@ -778,7 +818,8 @@ class ClaudeAccountService {
         (account) =>
           account.isActive === 'true' &&
           account.status !== 'error' &&
-          account.schedulable !== 'false'
+          account.schedulable !== 'false' &&
+          this.isAccountNotExpired(account)
       )
 
       // 如果请求的是 Opus 模型，过滤掉 Pro 和 Free 账号
@@ -873,7 +914,8 @@ class ClaudeAccountService {
           boundAccount &&
           boundAccount.isActive === 'true' &&
           boundAccount.status !== 'error' &&
-          boundAccount.schedulable !== 'false'
+          boundAccount.schedulable !== 'false' &&
+          this.isAccountNotExpired(boundAccount)
         ) {
           logger.info(
             `🎯 Using bound dedicated account: ${boundAccount.name} (${apiKeyData.claudeAccountId}) for API key ${apiKeyData.name}`
@@ -894,7 +936,8 @@ class ClaudeAccountService {
           account.isActive === 'true' &&
           account.status !== 'error' &&
           account.schedulable !== 'false' &&
-          (account.accountType === 'shared' || !account.accountType) // 兼容旧数据
+          (account.accountType === 'shared' || !account.accountType) && // 兼容旧数据
+          this.isAccountNotExpired(account)
       )
 
       // 如果请求的是 Opus 模型，过滤掉 Pro 和 Free 账号

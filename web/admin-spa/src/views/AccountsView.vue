@@ -207,6 +207,21 @@
                 <i v-else class="fas fa-sort ml-1 text-gray-400" />
               </th>
               <th
+                class="w-[12%] min-w-[110px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
+                @click="sortAccounts('expiresAt')"
+              >
+                到期时间
+                <i
+                  v-if="accountsSortBy === 'expiresAt'"
+                  :class="[
+                    'fas',
+                    accountsSortOrder === 'asc' ? 'fa-sort-up' : 'fa-sort-down',
+                    'ml-1'
+                  ]"
+                />
+                <i v-else class="fas fa-sort ml-1 text-gray-400" />
+              </th>
+              <th
                 class="w-[12%] min-w-[100px] cursor-pointer px-3 py-4 text-left text-xs font-bold uppercase tracking-wider text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-gray-600"
                 @click="sortAccounts('status')"
               >
@@ -538,12 +553,75 @@
                     <span class="text-xs font-medium text-teal-700 dark:text-teal-300">Relay</span>
                   </div>
                   <div
+                    v-else-if="account.platform === 'droid'"
+                    class="flex items-center gap-1.5 rounded-lg border border-cyan-200 bg-gradient-to-r from-cyan-100 to-sky-100 px-2.5 py-1 dark:border-cyan-700 dark:from-cyan-900/20 dark:to-sky-900/20"
+                  >
+                    <i class="fas fa-robot text-xs text-cyan-700 dark:text-cyan-400" />
+                    <span class="text-xs font-semibold text-cyan-800 dark:text-cyan-300"
+                      >Droid</span
+                    >
+                    <span class="mx-1 h-4 w-px bg-cyan-300 dark:bg-cyan-600" />
+                    <span class="text-xs font-medium text-cyan-700 dark:text-cyan-300">
+                      {{ getDroidAuthType(account) }}
+                    </span>
+                    <span
+                      v-if="isDroidApiKeyMode(account)"
+                      :class="getDroidApiKeyBadgeClasses(account)"
+                    >
+                      <i class="fas fa-key text-[9px]" />
+                      <span>x{{ getDroidApiKeyCount(account) }}</span>
+                    </span>
+                  </div>
+                  <div
                     v-else
                     class="flex items-center gap-1.5 rounded-lg border border-gray-200 bg-gradient-to-r from-gray-100 to-gray-200 px-2.5 py-1"
                   >
                     <i class="fas fa-question text-xs text-gray-700" />
                     <span class="text-xs font-semibold text-gray-800">未知</span>
                   </div>
+                </div>
+              </td>
+              <td class="whitespace-nowrap px-3 py-4">
+                <div class="flex flex-col gap-1">
+                  <!-- 已设置过期时间 -->
+                  <span v-if="account.expiresAt">
+                    <span
+                      v-if="isExpired(account.expiresAt)"
+                      class="inline-flex cursor-pointer items-center text-red-600 hover:underline"
+                      style="font-size: 13px"
+                      @click.stop="startEditAccountExpiry(account)"
+                    >
+                      <i class="fas fa-exclamation-circle mr-1 text-xs" />
+                      已过期
+                    </span>
+                    <span
+                      v-else-if="isExpiringSoon(account.expiresAt)"
+                      class="inline-flex cursor-pointer items-center text-orange-600 hover:underline"
+                      style="font-size: 13px"
+                      @click.stop="startEditAccountExpiry(account)"
+                    >
+                      <i class="fas fa-clock mr-1 text-xs" />
+                      {{ formatExpireDate(account.expiresAt) }}
+                    </span>
+                    <span
+                      v-else
+                      class="cursor-pointer text-gray-600 hover:underline dark:text-gray-400"
+                      style="font-size: 13px"
+                      @click.stop="startEditAccountExpiry(account)"
+                    >
+                      {{ formatExpireDate(account.expiresAt) }}
+                    </span>
+                  </span>
+                  <!-- 永不过期 -->
+                  <span
+                    v-else
+                    class="inline-flex cursor-pointer items-center text-gray-400 hover:underline dark:text-gray-500"
+                    style="font-size: 13px"
+                    @click.stop="startEditAccountExpiry(account)"
+                  >
+                    <i class="fas fa-infinity mr-1 text-xs" />
+                    永不过期
+                  </span>
                 </div>
               </td>
               <td class="whitespace-nowrap px-3 py-4">
@@ -646,7 +724,8 @@
                     account.platform === 'openai' ||
                     account.platform === 'openai-responses' ||
                     account.platform === 'azure_openai' ||
-                    account.platform === 'ccr'
+                    account.platform === 'ccr' ||
+                    account.platform === 'droid'
                   "
                   class="flex items-center gap-2"
                 >
@@ -1098,7 +1177,9 @@
                           ? 'bg-gradient-to-br from-gray-600 to-gray-700'
                           : account.platform === 'ccr'
                             ? 'bg-gradient-to-br from-teal-500 to-emerald-600'
-                            : 'bg-gradient-to-br from-blue-500 to-blue-600'
+                            : account.platform === 'droid'
+                              ? 'bg-gradient-to-br from-cyan-500 to-sky-600'
+                              : 'bg-gradient-to-br from-blue-500 to-blue-600'
                 ]"
               >
                 <i
@@ -1114,7 +1195,9 @@
                             ? 'fas fa-openai'
                             : account.platform === 'ccr'
                               ? 'fas fa-code-branch'
-                              : 'fas fa-robot'
+                              : account.platform === 'droid'
+                                ? 'fas fa-robot'
+                                : 'fas fa-robot'
                   ]"
                 />
               </div>
@@ -1628,6 +1711,15 @@
       :summary="accountUsageSummary"
       @close="closeAccountUsageModal"
     />
+
+    <!-- 账户过期时间编辑弹窗 -->
+    <AccountExpiryEditModal
+      ref="expiryEditModalRef"
+      :account="editingExpiryAccount || { id: null, expiresAt: null, name: '' }"
+      :show="!!editingExpiryAccount"
+      @close="closeAccountExpiryEdit"
+      @save="handleSaveAccountExpiry"
+    />
   </div>
 </template>
 
@@ -1639,6 +1731,7 @@ import { useConfirm } from '@/composables/useConfirm'
 import AccountForm from '@/components/accounts/AccountForm.vue'
 import CcrAccountForm from '@/components/accounts/CcrAccountForm.vue'
 import AccountUsageDetailModal from '@/components/accounts/AccountUsageDetailModal.vue'
+import AccountExpiryEditModal from '@/components/accounts/AccountExpiryEditModal.vue'
 import ConfirmModal from '@/components/common/ConfirmModal.vue'
 import CustomDropdown from '@/components/common/CustomDropdown.vue'
 
@@ -1686,7 +1779,18 @@ const accountUsageSummary = ref({})
 const accountUsageOverview = ref({})
 const accountUsageGeneratedAt = ref('')
 
-const supportedUsagePlatforms = ['claude', 'claude-console', 'openai', 'openai-responses', 'gemini']
+const supportedUsagePlatforms = [
+  'claude',
+  'claude-console',
+  'openai',
+  'openai-responses',
+  'gemini',
+  'droid'
+]
+
+// 过期时间编辑弹窗状态
+const editingExpiryAccount = ref(null)
+const expiryEditModalRef = ref(null)
 
 // 缓存状态标志
 const apiKeysLoaded = ref(false)
@@ -1712,7 +1816,8 @@ const platformOptions = ref([
   { value: 'azure_openai', label: 'Azure OpenAI', icon: 'fab fa-microsoft' },
   { value: 'bedrock', label: 'Bedrock', icon: 'fab fa-aws' },
   { value: 'openai-responses', label: 'OpenAI-Responses', icon: 'fa-server' },
-  { value: 'ccr', label: 'CCR', icon: 'fa-code-branch' }
+  { value: 'ccr', label: 'CCR', icon: 'fa-code-branch' },
+  { value: 'droid', label: 'Droid', icon: 'fa-robot' }
 ])
 
 const groupOptions = computed(() => {
@@ -1723,13 +1828,15 @@ const groupOptions = computed(() => {
   accountGroups.value.forEach((group) => {
     options.push({
       value: group.id,
-      label: `${group.name} (${group.platform === 'claude' ? 'Claude' : group.platform === 'gemini' ? 'Gemini' : 'OpenAI'})`,
+      label: `${group.name} (${group.platform === 'claude' ? 'Claude' : group.platform === 'gemini' ? 'Gemini' : group.platform === 'openai' ? 'OpenAI' : 'Droid'})`,
       icon:
         group.platform === 'claude'
           ? 'fa-brain'
           : group.platform === 'gemini'
             ? 'fa-robot'
-            : 'fa-openai'
+            : group.platform === 'openai'
+              ? 'fa-openai'
+              : 'fa-robot'
     })
   })
   return options
@@ -2034,7 +2141,8 @@ const loadAccounts = async (forceReload = false) => {
         apiClient.get('/admin/openai-accounts', { params }),
         apiClient.get('/admin/azure-openai-accounts', { params }),
         apiClient.get('/admin/openai-responses-accounts', { params }),
-        apiClient.get('/admin/ccr-accounts', { params })
+        apiClient.get('/admin/ccr-accounts', { params }),
+        apiClient.get('/admin/droid-accounts', { params })
       )
     } else {
       // 只请求指定平台，其他平台设为null占位
@@ -2047,7 +2155,9 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
             Promise.resolve({ success: true, data: [] }), // azure-openai 占位
-            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'claude-console':
@@ -2058,7 +2168,9 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
             Promise.resolve({ success: true, data: [] }), // azure-openai 占位
-            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'bedrock':
@@ -2069,7 +2181,9 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
             Promise.resolve({ success: true, data: [] }), // azure-openai 占位
-            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'gemini':
@@ -2080,7 +2194,9 @@ const loadAccounts = async (forceReload = false) => {
             apiClient.get('/admin/gemini-accounts', { params }),
             Promise.resolve({ success: true, data: [] }), // openai 占位
             Promise.resolve({ success: true, data: [] }), // azure-openai 占位
-            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'openai':
@@ -2091,7 +2207,9 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             apiClient.get('/admin/openai-accounts', { params }),
             Promise.resolve({ success: true, data: [] }), // azure-openai 占位
-            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'azure_openai':
@@ -2102,7 +2220,9 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
             apiClient.get('/admin/azure-openai-accounts', { params }),
-            Promise.resolve({ success: true, data: [] }) // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'openai-responses':
@@ -2113,7 +2233,9 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
             Promise.resolve({ success: true, data: [] }), // azure-openai 占位
-            apiClient.get('/admin/openai-responses-accounts', { params })
+            apiClient.get('/admin/openai-responses-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            Promise.resolve({ success: true, data: [] }) // droid 占位
           )
           break
         case 'ccr':
@@ -2124,12 +2246,29 @@ const loadAccounts = async (forceReload = false) => {
             Promise.resolve({ success: true, data: [] }), // gemini 占位
             Promise.resolve({ success: true, data: [] }), // openai 占位
             Promise.resolve({ success: true, data: [] }), // azure 占位
-            apiClient.get('/admin/ccr-accounts', { params })
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            apiClient.get('/admin/ccr-accounts', { params }),
+            Promise.resolve({ success: true, data: [] }) // droid 占位
+          )
+          break
+        case 'droid':
+          requests.push(
+            Promise.resolve({ success: true, data: [] }), // claude 占位
+            Promise.resolve({ success: true, data: [] }), // claude-console 占位
+            Promise.resolve({ success: true, data: [] }), // bedrock 占位
+            Promise.resolve({ success: true, data: [] }), // gemini 占位
+            Promise.resolve({ success: true, data: [] }), // openai 占位
+            Promise.resolve({ success: true, data: [] }), // azure 占位
+            Promise.resolve({ success: true, data: [] }), // openai-responses 占位
+            Promise.resolve({ success: true, data: [] }), // ccr 占位
+            apiClient.get('/admin/droid-accounts', { params })
           )
           break
         default:
           // 默认情况下返回空数组
           requests.push(
+            Promise.resolve({ success: true, data: [] }),
+            Promise.resolve({ success: true, data: [] }),
             Promise.resolve({ success: true, data: [] }),
             Promise.resolve({ success: true, data: [] }),
             Promise.resolve({ success: true, data: [] }),
@@ -2156,7 +2295,8 @@ const loadAccounts = async (forceReload = false) => {
       openaiData,
       azureOpenaiData,
       openaiResponsesData,
-      ccrData
+      ccrData,
+      droidData
     ] = await Promise.all(requests)
 
     const allAccounts = []
@@ -2250,6 +2390,18 @@ const loadAccounts = async (forceReload = false) => {
       allAccounts.push(...ccrAccounts)
     }
 
+    // Droid 账户
+    if (droidData && droidData.success) {
+      const droidAccounts = (droidData.data || []).map((acc) => {
+        return {
+          ...acc,
+          platform: 'droid',
+          boundApiKeysCount: acc.boundApiKeysCount ?? 0
+        }
+      })
+      allAccounts.push(...droidAccounts)
+    }
+
     // 根据分组筛选器过滤账户
     let filteredAccounts = allAccounts
     if (groupFilter.value !== 'all') {
@@ -2269,6 +2421,14 @@ const loadAccounts = async (forceReload = false) => {
         })
       }
     }
+
+    filteredAccounts = filteredAccounts.map((account) => {
+      const proxyConfig = normalizeProxyData(account.proxyConfig || account.proxy)
+      return {
+        ...account,
+        proxyConfig: proxyConfig || null
+      }
+    })
 
     accounts.value = filteredAccounts
     cleanupSelectedAccounts()
@@ -2408,24 +2568,86 @@ const filterByGroup = () => {
   loadAccounts()
 }
 
+// 规范化代理配置，支持字符串与对象
+function normalizeProxyData(proxy) {
+  if (!proxy) {
+    return null
+  }
+
+  let proxyObject = proxy
+  if (typeof proxy === 'string') {
+    try {
+      proxyObject = JSON.parse(proxy)
+    } catch (error) {
+      return null
+    }
+  }
+
+  if (!proxyObject || typeof proxyObject !== 'object') {
+    return null
+  }
+
+  const candidate =
+    proxyObject.proxy && typeof proxyObject.proxy === 'object' ? proxyObject.proxy : proxyObject
+
+  const host =
+    typeof candidate.host === 'string'
+      ? candidate.host.trim()
+      : candidate.host !== undefined && candidate.host !== null
+        ? String(candidate.host).trim()
+        : ''
+
+  const port =
+    candidate.port !== undefined && candidate.port !== null ? String(candidate.port).trim() : ''
+
+  if (!host || !port) {
+    return null
+  }
+
+  const type =
+    typeof candidate.type === 'string' && candidate.type.trim() ? candidate.type.trim() : 'socks5'
+
+  const username =
+    typeof candidate.username === 'string'
+      ? candidate.username
+      : candidate.username !== undefined && candidate.username !== null
+        ? String(candidate.username)
+        : ''
+
+  const password =
+    typeof candidate.password === 'string'
+      ? candidate.password
+      : candidate.password !== undefined && candidate.password !== null
+        ? String(candidate.password)
+        : ''
+
+  return {
+    type,
+    host,
+    port,
+    username,
+    password
+  }
+}
+
 // 格式化代理信息显示
 const formatProxyDisplay = (proxy) => {
-  if (!proxy || !proxy.host || !proxy.port) return null
+  const parsed = normalizeProxyData(proxy)
+  if (!parsed) {
+    return null
+  }
 
-  // 缩短类型名称
-  const typeShort = proxy.type === 'socks5' ? 'S5' : proxy.type.toUpperCase()
+  const typeShort = parsed.type.toLowerCase() === 'socks5' ? 'S5' : parsed.type.toUpperCase()
 
-  // 缩短主机名（如果太长）
-  let host = proxy.host
+  let host = parsed.host
   if (host.length > 15) {
     host = host.substring(0, 12) + '...'
   }
 
-  let display = `${typeShort}://${host}:${proxy.port}`
+  let display = `${typeShort}://${host}:${parsed.port}`
 
-  // 如果有用户名密码，添加认证信息（部分隐藏）
-  if (proxy.username) {
-    display = `${typeShort}://***@${host}:${proxy.port}`
+  if (parsed.username) {
+    display = `${typeShort}://***@${host}:${parsed.port}`
   }
 
   return display
@@ -2542,6 +2764,8 @@ const resolveAccountDeleteEndpoint = (account) => {
       return `/admin/ccr-accounts/${account.id}`
     case 'gemini':
       return `/admin/gemini-accounts/${account.id}`
+    case 'droid':
+      return `/admin/droid-accounts/${account.id}`
     default:
       return null
   }
@@ -2720,6 +2944,8 @@ const resetAccountStatus = async (account) => {
       endpoint = `/admin/claude-console-accounts/${account.id}/reset-status`
     } else if (account.platform === 'ccr') {
       endpoint = `/admin/ccr-accounts/${account.id}/reset-status`
+    } else if (account.platform === 'droid') {
+      endpoint = `/admin/droid-accounts/${account.id}/reset-status`
     } else {
       showToast('不支持的账户类型', 'error')
       account.isResetting = false
@@ -2766,6 +2992,8 @@ const toggleSchedulable = async (account) => {
       endpoint = `/admin/openai-responses-accounts/${account.id}/toggle-schedulable`
     } else if (account.platform === 'ccr') {
       endpoint = `/admin/ccr-accounts/${account.id}/toggle-schedulable`
+    } else if (account.platform === 'droid') {
+      endpoint = `/admin/droid-accounts/${account.id}/toggle-schedulable`
     } else {
       showToast('该账户类型暂不支持调度控制', 'warning')
       return
@@ -2823,6 +3051,112 @@ const getGeminiAuthType = () => {
 const getOpenAIAuthType = () => {
   // OpenAI 统一显示 OAuth
   return 'OAuth'
+}
+
+// 获取 Droid 账号的认证方式
+const getDroidAuthType = (account) => {
+  if (!account || typeof account !== 'object') {
+    return 'OAuth'
+  }
+
+  const apiKeyModeFlag =
+    account.isApiKeyMode ?? account.is_api_key_mode ?? account.apiKeyMode ?? account.api_key_mode
+
+  if (
+    apiKeyModeFlag === true ||
+    apiKeyModeFlag === 'true' ||
+    apiKeyModeFlag === 1 ||
+    apiKeyModeFlag === '1'
+  ) {
+    return 'API Key'
+  }
+
+  const methodCandidate =
+    account.authenticationMethod ||
+    account.authMethod ||
+    account.authentication_mode ||
+    account.authenticationMode ||
+    account.authentication_method ||
+    account.auth_type ||
+    account.authType ||
+    account.authentication_type ||
+    account.authenticationType ||
+    account.droidAuthType ||
+    account.droidAuthenticationMethod ||
+    account.method ||
+    account.auth ||
+    ''
+
+  if (typeof methodCandidate === 'string') {
+    const normalized = methodCandidate.trim().toLowerCase()
+    const compacted = normalized.replace(/[\s_-]/g, '')
+
+    if (compacted === 'apikey') {
+      return 'API Key'
+    }
+  }
+
+  return 'OAuth'
+}
+
+// 判断是否为 API Key 模式的 Droid 账号
+const isDroidApiKeyMode = (account) => getDroidAuthType(account) === 'API Key'
+
+// 获取 Droid 账号的 API Key 数量
+const getDroidApiKeyCount = (account) => {
+  if (!account || typeof account !== 'object') {
+    return 0
+  }
+
+  const candidates = [
+    account.apiKeyCount,
+    account.api_key_count,
+    account.apiKeysCount,
+    account.api_keys_count
+  ]
+
+  for (const candidate of candidates) {
+    const value = Number(candidate)
+    if (Number.isFinite(value) && value >= 0) {
+      return value
+    }
+  }
+
+  if (Array.isArray(account.apiKeys)) {
+    return account.apiKeys.length
+  }
+
+  if (typeof account.apiKeys === 'string' && account.apiKeys.trim()) {
+    try {
+      const parsed = JSON.parse(account.apiKeys)
+      if (Array.isArray(parsed)) {
+        return parsed.length
+      }
+    } catch (error) {
+      // 忽略解析错误，维持默认值
+    }
+  }
+
+  return 0
+}
+
+// 根据数量返回徽标样式
+const getDroidApiKeyBadgeClasses = (account) => {
+  const count = getDroidApiKeyCount(account)
+  const baseClass =
+    'ml-1 inline-flex items-center gap-1 rounded-md border px-1.5 py-[1px] text-[10px] font-medium shadow-sm backdrop-blur-sm'
+
+  if (count > 0) {
+    return [
+      baseClass,
+      'border-cyan-200 bg-cyan-50/90 text-cyan-700 dark:border-cyan-500/40 dark:bg-cyan-900/40 dark:text-cyan-200'
+    ]
+  }
+
+  return [
+    baseClass,
+    'border-rose-200 bg-rose-50/90 text-rose-600 dark:border-rose-500/40 dark:bg-rose-900/40 dark:text-rose-200'
+  ]
 }
 
 // 获取 Claude 账号类型显示
@@ -3356,6 +3690,105 @@ watch(paginatedAccounts, () => {
 watch(accounts, () => {
   cleanupSelectedAccounts()
 })
+// 到期时间相关方法
+const formatExpireDate = (dateString) => {
+  if (!dateString) return ''
+  const date = new Date(dateString)
+  return date.toLocaleDateString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  })
+}
+
+const isExpired = (expiresAt) => {
+  if (!expiresAt) return false
+  return new Date(expiresAt) < new Date()
+}
+
+const isExpiringSoon = (expiresAt) => {
+  if (!expiresAt) return false
+  const now = new Date()
+  const expireDate = new Date(expiresAt)
+  const daysUntilExpire = (expireDate - now) / (1000 * 60 * 60 * 24)
+  return daysUntilExpire > 0 && daysUntilExpire <= 7
+}
+
+// 开始编辑账户过期时间
+const startEditAccountExpiry = (account) => {
+  editingExpiryAccount.value = account
+}
+
+// 关闭账户过期时间编辑
+const closeAccountExpiryEdit = () => {
+  editingExpiryAccount.value = null
+}
+
+// 根据账户平台解析更新端点
+const resolveAccountUpdateEndpoint = (account) => {
+  switch (account.platform) {
+    case 'claude':
+      return `/admin/claude-accounts/${account.id}`
+    case 'claude-console':
+      return `/admin/claude-console-accounts/${account.id}`
+    case 'bedrock':
+      return `/admin/bedrock-accounts/${account.id}`
+    case 'openai':
+      return `/admin/openai-accounts/${account.id}`
+    case 'azure_openai':
+      return `/admin/azure-openai-accounts/${account.id}`
+    case 'openai-responses':
+      return `/admin/openai-responses-accounts/${account.id}`
+    case 'ccr':
+      return `/admin/ccr-accounts/${account.id}`
+    case 'gemini':
+      return `/admin/gemini-accounts/${account.id}`
+    case 'droid':
+      return `/admin/droid-accounts/${account.id}`
+    default:
+      throw new Error(`Unsupported platform: ${account.platform}`)
+  }
+}
+
+// 保存账户过期时间
+const handleSaveAccountExpiry = async ({ accountId, expiresAt }) => {
+  try {
+    // 找到对应的账户以获取平台信息
+    const account = accounts.value.find((acc) => acc.id === accountId)
+    if (!account) {
+      showToast('账户不存在', 'error')
+      if (expiryEditModalRef.value) {
+        expiryEditModalRef.value.resetSaving()
+      }
+      return
+    }
+
+    // 根据平台动态选择端点
+    const endpoint = resolveAccountUpdateEndpoint(account)
+    const data = await apiClient.put(endpoint, {
+      expiresAt: expiresAt || null
+    })
+
+    if (data.success) {
+      showToast('账户到期时间已更新', 'success')
+      // 更新本地数据
+      account.expiresAt = expiresAt || null
+      closeAccountExpiryEdit()
+    } else {
+      showToast(data.message || '更新失败', 'error')
+      // 重置保存状态
+      if (expiryEditModalRef.value) {
+        expiryEditModalRef.value.resetSaving()
+      }
+    }
+  } catch (error) {
+    showToast(error.message || '更新失败', 'error')
+    // 重置保存状态
+    if (expiryEditModalRef.value) {
+      expiryEditModalRef.value.resetSaving()
+    }
+  }
+}
 
 onMounted(() => {
   // 首次加载时强制刷新所有数据
@@ -3365,7 +3798,6 @@ onMounted(() => {
 
 <style scoped>
 .table-container {
-  overflow-x: auto;
   border-radius: 12px;
   border: 1px solid rgba(0, 0, 0, 0.05);
 }
@@ -3397,12 +3829,6 @@ onMounted(() => {
 }
 .accounts-container {
   min-height: calc(100vh - 300px);
-}
-
-.table-container {
-  overflow-x: auto;
-  border-radius: 12px;
-  border: 1px solid rgba(0, 0, 0, 0.05);
 }
 
 .table-row {

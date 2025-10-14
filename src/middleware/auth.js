@@ -7,6 +7,88 @@ const redis = require('../models/redis')
 // const { RateLimiterRedis } = require('rate-limiter-flexible') // 暂时未使用
 const ClientValidator = require('../validators/clientValidator')
 
+const FALLBACK_CONCURRENCY_CONFIG = {
+  leaseSeconds: 300,
+  renewIntervalSeconds: 30,
+  cleanupGraceSeconds: 30
+}
+
+const resolveConcurrencyConfig = () => {
+  if (typeof redis._getConcurrencyConfig === 'function') {
+    return redis._getConcurrencyConfig()
+  }
+
+  const raw = {
+    ...FALLBACK_CONCURRENCY_CONFIG,
+    ...(config.concurrency || {})
+  }
+
+  const toNumber = (value, fallback) => {
+    const parsed = Number(value)
+    if (!Number.isFinite(parsed)) {
+      return fallback
+    }
+    return parsed
+  }
+
+  const leaseSeconds = Math.max(
+    toNumber(raw.leaseSeconds, FALLBACK_CONCURRENCY_CONFIG.leaseSeconds),
+    30
+  )
+
+  let renewIntervalSeconds
+  if (raw.renewIntervalSeconds === 0 || raw.renewIntervalSeconds === '0') {
+    renewIntervalSeconds = 0
+  } else {
+    renewIntervalSeconds = Math.max(
+      toNumber(raw.renewIntervalSeconds, FALLBACK_CONCURRENCY_CONFIG.renewIntervalSeconds),
+      0
+    )
+  }
+
+  const cleanupGraceSeconds = Math.max(
+    toNumber(raw.cleanupGraceSeconds, FALLBACK_CONCURRENCY_CONFIG.cleanupGraceSeconds),
+    0
+  )
+
+  return {
+    leaseSeconds,
+    renewIntervalSeconds,
+    cleanupGraceSeconds
+  }
+}
+
+const TOKEN_COUNT_PATHS = new Set([
+  '/v1/messages/count_tokens',
+  '/api/v1/messages/count_tokens',
+  '/claude/v1/messages/count_tokens',
+  '/droid/claude/v1/messages/count_tokens'
+])
+
+function normalizeRequestPath(value) {
+  if (!value) {
+    return '/'
+  }
+  const lower = value.split('?')[0].toLowerCase()
+  const collapsed = lower.replace(/\/{2,}/g, '/')
+  if (collapsed.length > 1 && collapsed.endsWith('/')) {
+    return collapsed.slice(0, -1)
+  }
+  return collapsed || '/'
+}
+
+function isTokenCountRequest(req) {
+  const combined = normalizeRequestPath(`${req.baseUrl || ''}${req.path || ''}`)
+  if (TOKEN_COUNT_PATHS.has(combined)) {
+    return true
+  }
+  const original = normalizeRequestPath(req.originalUrl || '')
+  if (TOKEN_COUNT_PATHS.has(original)) {
+    return true
+  }
+  return false
+}
+
 // 🔑 API Key验证中间件（优化版）
 const authenticateApiKey = async (req, res, next) => {
   const startTime = Date.now()
@@ -49,8 +131,11 @@ const authenticateApiKey = async (req, res, next) => {
       })
     }
 
+    const skipKeyRestrictions = isTokenCountRequest(req)
+
     // 🔒 检查客户端限制（使用新的验证器）
     if (
+      !skipKeyRestrictions &&
       validation.keyData.enableClientRestriction &&
       validation.keyData.allowedClients?.length > 0
     ) {
@@ -81,14 +166,11 @@ const authenticateApiKey = async (req, res, next) => {
 
     // 检查并发限制
     const concurrencyLimit = validation.keyData.concurrencyLimit || 0
-    if (concurrencyLimit > 0) {
-      const concurrencyConfig = config.concurrency || {}
-      const leaseSeconds = Math.max(concurrencyConfig.leaseSeconds || 900, 30)
-      const rawRenewInterval =
-        typeof concurrencyConfig.renewIntervalSeconds === 'number'
-          ? concurrencyConfig.renewIntervalSeconds
-          : 60
-      let renewIntervalSeconds = rawRenewInterval
+    if (!skipKeyRestrictions && concurrencyLimit > 0) {
+      const { leaseSeconds: configLeaseSeconds, renewIntervalSeconds: configRenewIntervalSeconds } =
+        resolveConcurrencyConfig()
+      const leaseSeconds = Math.max(Number(configLeaseSeconds) || 300, 30)
+      let renewIntervalSeconds = configRenewIntervalSeconds
       if (renewIntervalSeconds > 0) {
         const maxSafeRenew = Math.max(leaseSeconds - 5, 15)
         renewIntervalSeconds = Math.min(Math.max(renewIntervalSeconds, 15), maxSafeRenew)
@@ -177,6 +259,29 @@ const authenticateApiKey = async (req, res, next) => {
       req.once('close', () => {
         logger.api(
           `🔌 Request closed for key: ${validation.keyData.id} (${validation.keyData.name})`
+        )
+        decrementConcurrency()
+      })
+
+      req.once('aborted', () => {
+        logger.warn(
+          `⚠️ Request aborted for key: ${validation.keyData.id} (${validation.keyData.name})`
+        )
+        decrementConcurrency()
+      })
+
+      req.once('error', (error) => {
+        logger.error(
+          `❌ Request error for key ${validation.keyData.id} (${validation.keyData.name}):`,
+          error
+        )
+        decrementConcurrency()
+      })
+
+      res.once('error', (error) => {
+        logger.error(
+          `❌ Response error for key ${validation.keyData.id} (${validation.keyData.name}):`,
+          error
         )
         decrementConcurrency()
       })
@@ -438,6 +543,7 @@ const authenticateApiKey = async (req, res, next) => {
       geminiAccountId: validation.keyData.geminiAccountId,
       openaiAccountId: validation.keyData.openaiAccountId, // 添加 OpenAI 账号ID
       bedrockAccountId: validation.keyData.bedrockAccountId, // 添加 Bedrock 账号ID
+      droidAccountId: validation.keyData.droidAccountId,
       permissions: validation.keyData.permissions,
       concurrencyLimit: validation.keyData.concurrencyLimit,
       rateLimitWindow: validation.keyData.rateLimitWindow,
