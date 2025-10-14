@@ -850,10 +850,24 @@ class ClaudeConsoleRelayService {
                   if (!collectedUsageData.model) {
                     collectedUsageData.model = body.model || account?.defaultModel || null
                   }
+
+                  // 构建完整的响应对象（包含收集的内容块）
+                  const callbackResponse = {
+                    content: collectedContent.map((item) => ({
+                      type: 'tool_use',
+                      name: item.name,
+                      input: item.input
+                    }))
+                  }
+
                   logger.info(
                     `📊 [Console] Saving incomplete usage data via fallback: ${JSON.stringify(collectedUsageData)}`
                   )
-                  usageCallback({ ...collectedUsageData, accountId })
+                  usageCallback({
+                    ...collectedUsageData,
+                    accountId,
+                    response: callbackResponse
+                  })
                   finalUsageReported = true
                 } else {
                   logger.warn(
