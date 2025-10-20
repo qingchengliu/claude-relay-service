@@ -6,19 +6,6 @@ const logger = require('../utils/logger')
 const config = require('../../config/config')
 const LRUCache = require('../utils/lruCache')
 
-function normalizeSubscriptionExpiresAt(value) {
-  if (value === undefined || value === null || value === '') {
-    return ''
-  }
-
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-
-  return date.toISOString()
-}
-
 class CcrAccountService {
   constructor() {
     // 加密相关常量
@@ -62,8 +49,7 @@ class CcrAccountService {
       accountType = 'shared', // 'dedicated' or 'shared'
       schedulable = true, // 是否可被调度
       dailyQuota = 0, // 每日额度限制（美元），0表示不限制
-      quotaResetTime = '00:00', // 额度重置时间（HH:mm格式）
-      subscriptionExpiresAt = null
+      quotaResetTime = '00:00' // 额度重置时间（HH:mm格式）
     } = options
 
     // 验证必填字段
@@ -90,6 +76,11 @@ class CcrAccountService {
       proxy: proxy ? JSON.stringify(proxy) : '',
       isActive: isActive.toString(),
       accountType,
+
+      // ✅ 新增：账户订阅到期时间（业务字段，手动管理）
+      // 注意：CCR 使用 API Key 认证，没有 OAuth token，因此没有 expiresAt
+      subscriptionExpiresAt: options.subscriptionExpiresAt || null,
+
       createdAt: new Date().toISOString(),
       lastUsedAt: '',
       status: 'active',
@@ -105,8 +96,7 @@ class CcrAccountService {
       // 使用与统计一致的时区日期，避免边界问题
       lastResetDate: redis.getDateStringInTimezone(), // 最后重置日期（按配置时区）
       quotaResetTime, // 额度重置时间
-      quotaStoppedAt: '', // 因额度停用的时间
-      subscriptionExpiresAt: normalizeSubscriptionExpiresAt(subscriptionExpiresAt)
+      quotaStoppedAt: '' // 因额度停用的时间
     }
 
     const client = redis.getClientSafe()
@@ -142,8 +132,7 @@ class CcrAccountService {
       dailyUsage: 0,
       lastResetDate: accountData.lastResetDate,
       quotaResetTime,
-      quotaStoppedAt: null,
-      subscriptionExpiresAt: accountData.subscriptionExpiresAt || null
+      quotaStoppedAt: null
     }
   }
 
@@ -181,14 +170,16 @@ class CcrAccountService {
             errorMessage: accountData.errorMessage,
             rateLimitInfo,
             schedulable: accountData.schedulable !== 'false', // 默认为true，只有明确设置为false才不可调度
+
+            // ✅ 前端显示订阅过期时间（业务字段）
+            expiresAt: accountData.subscriptionExpiresAt || null,
+
             // 额度管理相关
             dailyQuota: parseFloat(accountData.dailyQuota || '0'),
             dailyUsage: parseFloat(accountData.dailyUsage || '0'),
             lastResetDate: accountData.lastResetDate || '',
             quotaResetTime: accountData.quotaResetTime || '00:00',
-            quotaStoppedAt: accountData.quotaStoppedAt || null,
-            expiresAt: accountData.expiresAt || null,
-            subscriptionExpiresAt: accountData.subscriptionExpiresAt || null
+            quotaStoppedAt: accountData.quotaStoppedAt || null
           })
         }
       }
@@ -242,11 +233,6 @@ class CcrAccountService {
     logger.debug(
       `[DEBUG] Final CCR account data - name: ${accountData.name}, hasApiUrl: ${!!accountData.apiUrl}, hasApiKey: ${!!accountData.apiKey}, supportedModels: ${JSON.stringify(accountData.supportedModels)}`
     )
-
-    accountData.subscriptionExpiresAt =
-      accountData.subscriptionExpiresAt && accountData.subscriptionExpiresAt !== ''
-        ? accountData.subscriptionExpiresAt
-        : null
 
     return accountData
   }
@@ -311,12 +297,10 @@ class CcrAccountService {
         updatedData.quotaResetTime = updates.quotaResetTime
       }
 
-      if (Object.prototype.hasOwnProperty.call(updates, 'subscriptionExpiresAt')) {
-        updatedData.subscriptionExpiresAt = normalizeSubscriptionExpiresAt(
-          updates.subscriptionExpiresAt
-        )
-      } else if (Object.prototype.hasOwnProperty.call(updates, 'expiresAt')) {
-        updatedData.subscriptionExpiresAt = normalizeSubscriptionExpiresAt(updates.expiresAt)
+      // ✅ 直接保存 subscriptionExpiresAt（如果提供）
+      // CCR 使用 API Key，没有 token 刷新逻辑，不会覆盖此字段
+      if (updates.subscriptionExpiresAt !== undefined) {
+        updatedData.subscriptionExpiresAt = updates.subscriptionExpiresAt
       }
 
       await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountId}`, updatedData)
@@ -579,8 +563,21 @@ class CcrAccountService {
     if (!modelMapping || Object.keys(modelMapping).length === 0) {
       return true
     }
-    // 检查请求的模型是否在映射表的键中
-    return Object.prototype.hasOwnProperty.call(modelMapping, requestedModel)
+
+    // 检查请求的模型是否在映射表的键中（精确匹配）
+    if (Object.prototype.hasOwnProperty.call(modelMapping, requestedModel)) {
+      return true
+    }
+
+    // 尝试大小写不敏感匹配
+    const requestedModelLower = requestedModel.toLowerCase()
+    for (const key of Object.keys(modelMapping)) {
+      if (key.toLowerCase() === requestedModelLower) {
+        return true
+      }
+    }
+
+    return false
   }
 
   // 🔄 获取映射后的模型名称
@@ -590,8 +587,21 @@ class CcrAccountService {
       return requestedModel
     }
 
-    // 返回映射后的模型名，如果不存在映射则返回原模型名
-    return modelMapping[requestedModel] || requestedModel
+    // 精确匹配
+    if (modelMapping[requestedModel]) {
+      return modelMapping[requestedModel]
+    }
+
+    // 大小写不敏感匹配
+    const requestedModelLower = requestedModel.toLowerCase()
+    for (const [key, value] of Object.entries(modelMapping)) {
+      if (key.toLowerCase() === requestedModelLower) {
+        return value
+      }
+    }
+
+    // 如果不存在映射则返回原模型名
+    return requestedModel
   }
 
   // 🔐 加密敏感数据
@@ -928,6 +938,19 @@ class CcrAccountService {
       logger.error(`❌ Failed to reset CCR account status: ${accountId}`, error)
       throw error
     }
+  }
+
+  /**
+   * ⏰ 检查账户订阅是否过期
+   * @param {Object} account - 账户对象
+   * @returns {boolean} - true: 已过期, false: 未过期
+   */
+  isSubscriptionExpired(account) {
+    if (!account.subscriptionExpiresAt) {
+      return false // 未设置视为永不过期
+    }
+    const expiryDate = new Date(account.subscriptionExpiresAt)
+    return expiryDate <= new Date()
   }
 }
 

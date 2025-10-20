@@ -12,6 +12,9 @@ const claudeCodeHeadersService = require('./claudeCodeHeadersService')
 const redis = require('../models/redis')
 const ClaudeCodeValidator = require('../validators/clients/claudeCodeValidator')
 const { formatDateWithTimezone } = require('../utils/dateHelper')
+const runtimeAddon = require('../utils/runtimeAddon')
+
+const RUNTIME_EVENT_FMT_CLAUDE_REQ = 'fmtClaudeReq'
 
 class ClaudeRelayService {
   constructor() {
@@ -226,6 +229,9 @@ class ClaudeRelayService {
         },
         options
       )
+
+      response.accountId = accountId
+      response.accountType = accountType
 
       // 移除监听器（请求成功完成）
       if (clientRequest) {
@@ -893,6 +899,36 @@ class ClaudeRelayService {
     return filteredHeaders
   }
 
+  _applyLocalRequestFormatters(body, headers, context = {}) {
+    const normalizedHeaders = headers && typeof headers === 'object' ? { ...headers } : {}
+
+    try {
+      const payload = {
+        body,
+        headers: normalizedHeaders,
+        ...context
+      }
+
+      const result = runtimeAddon.emitSync(RUNTIME_EVENT_FMT_CLAUDE_REQ, payload)
+      if (!result || typeof result !== 'object') {
+        return { body, headers: normalizedHeaders }
+      }
+
+      const nextBody = result.body && typeof result.body === 'object' ? result.body : body
+      const nextHeaders =
+        result.headers && typeof result.headers === 'object' ? result.headers : normalizedHeaders
+      const abortResponse =
+        result.abortResponse && typeof result.abortResponse === 'object'
+          ? result.abortResponse
+          : null
+
+      return { body: nextBody, headers: nextHeaders, abortResponse }
+    } catch (error) {
+      logger.warn('⚠️ 应用本地 fmtClaudeReq 插件失败:', error)
+      return { body, headers: normalizedHeaders }
+    }
+  }
+
   // 🔗 发送请求到Claude API
   async _makeClaudeRequest(
     body,
@@ -918,7 +954,8 @@ class ClaudeRelayService {
     const isRealClaudeCode = this.isRealClaudeCodeRequest(body)
 
     // 如果不是真实的 Claude Code 请求，需要使用从账户获取的 Claude Code headers
-    const finalHeaders = { ...filteredHeaders }
+    let finalHeaders = { ...filteredHeaders }
+    let requestPayload = body
 
     if (!isRealClaudeCode) {
       // 获取该账号存储的 Claude Code headers
@@ -932,6 +969,21 @@ class ClaudeRelayService {
         }
       })
     }
+
+    const extensionResult = this._applyLocalRequestFormatters(requestPayload, finalHeaders, {
+      account,
+      accountId,
+      clientHeaders,
+      requestOptions,
+      isStream: false
+    })
+
+    if (extensionResult.abortResponse) {
+      return extensionResult.abortResponse
+    }
+
+    requestPayload = extensionResult.body
+    finalHeaders = extensionResult.headers
 
     return new Promise((resolve, reject) => {
       // 支持自定义路径（如 count_tokens）
@@ -1061,7 +1113,7 @@ class ClaudeRelayService {
       })
 
       // 写入请求体
-      req.write(JSON.stringify(body))
+      req.write(JSON.stringify(requestPayload))
       req.end()
     })
   }
@@ -1222,7 +1274,8 @@ class ClaudeRelayService {
     const isRealClaudeCode = this.isRealClaudeCodeRequest(body)
 
     // 如果不是真实的 Claude Code 请求，需要使用从账户获取的 Claude Code headers
-    const finalHeaders = { ...filteredHeaders }
+    let finalHeaders = { ...filteredHeaders }
+    let requestPayload = body
 
     if (!isRealClaudeCode) {
       // 获取该账号存储的 Claude Code headers
@@ -1236,6 +1289,23 @@ class ClaudeRelayService {
         }
       })
     }
+
+    const extensionResult = this._applyLocalRequestFormatters(requestPayload, finalHeaders, {
+      account,
+      accountId,
+      accountType,
+      sessionHash,
+      clientHeaders,
+      requestOptions,
+      isStream: true
+    })
+
+    if (extensionResult.abortResponse) {
+      return extensionResult.abortResponse
+    }
+
+    requestPayload = extensionResult.body
+    finalHeaders = extensionResult.headers
 
     return new Promise((resolve, reject) => {
       const url = new URL(this.claudeApiUrl)
@@ -1919,157 +1989,7 @@ class ClaudeRelayService {
       })
 
       // 写入请求体
-      req.write(JSON.stringify(body))
-      req.end()
-    })
-  }
-
-  // 🌊 发送流式请求到Claude API
-  async _makeClaudeStreamRequest(
-    body,
-    accessToken,
-    proxyAgent,
-    clientHeaders,
-    responseStream,
-    requestOptions = {}
-  ) {
-    return new Promise((resolve, reject) => {
-      const url = new URL(this.claudeApiUrl)
-
-      // 获取过滤后的客户端 headers
-      const filteredHeaders = this._filterClientHeaders(clientHeaders)
-
-      const options = {
-        hostname: url.hostname,
-        port: url.port || 443,
-        path: url.pathname,
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          'anthropic-version': this.apiVersion,
-          ...filteredHeaders
-        },
-        agent: proxyAgent,
-        timeout: config.requestTimeout || 600000
-      }
-
-      // 如果客户端没有提供 User-Agent，使用默认值
-      if (!filteredHeaders['User-Agent'] && !filteredHeaders['user-agent']) {
-        // 第三个方法不支持统一 User-Agent，使用简化逻辑
-        const userAgent =
-          clientHeaders?.['user-agent'] ||
-          clientHeaders?.['User-Agent'] ||
-          'claude-cli/1.0.102 (external, cli)'
-        options.headers['User-Agent'] = userAgent
-      }
-
-      // 使用自定义的 betaHeader 或默认值
-      const betaHeader =
-        requestOptions?.betaHeader !== undefined ? requestOptions.betaHeader : this.betaHeader
-      if (betaHeader) {
-        options.headers['anthropic-beta'] = betaHeader
-      }
-
-      const req = https.request(options, (res) => {
-        // 设置响应头
-        responseStream.statusCode = res.statusCode
-        Object.keys(res.headers).forEach((key) => {
-          responseStream.setHeader(key, res.headers[key])
-        })
-
-        // 管道响应数据
-        res.pipe(responseStream)
-
-        res.on('end', () => {
-          logger.debug('🌊 Claude stream response completed')
-          resolve()
-        })
-      })
-
-      req.on('error', async (error) => {
-        logger.error(`❌ Claude stream request error:`, error.message, {
-          code: error.code,
-          errno: error.errno,
-          syscall: error.syscall
-        })
-
-        // 根据错误类型提供更具体的错误信息
-        let errorMessage = 'Upstream request failed'
-        let statusCode = 500
-        if (error.code === 'ECONNRESET') {
-          errorMessage = 'Connection reset by Claude API server'
-          statusCode = 502
-        } else if (error.code === 'ENOTFOUND') {
-          errorMessage = 'Unable to resolve Claude API hostname'
-          statusCode = 502
-        } else if (error.code === 'ECONNREFUSED') {
-          errorMessage = 'Connection refused by Claude API server'
-          statusCode = 502
-        } else if (error.code === 'ETIMEDOUT') {
-          errorMessage = 'Connection timed out to Claude API server'
-          statusCode = 504
-        }
-
-        if (!responseStream.headersSent) {
-          responseStream.writeHead(statusCode, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive'
-          })
-        }
-
-        if (!responseStream.destroyed) {
-          // 发送 SSE 错误事件
-          responseStream.write('event: error\n')
-          responseStream.write(
-            `data: ${JSON.stringify({
-              error: errorMessage,
-              code: error.code,
-              timestamp: new Date().toISOString()
-            })}\n\n`
-          )
-          responseStream.end()
-        }
-        reject(error)
-      })
-
-      req.on('timeout', async () => {
-        req.destroy()
-        logger.error(`❌ Claude stream request timeout`)
-
-        if (!responseStream.headersSent) {
-          responseStream.writeHead(504, {
-            'Content-Type': 'text/event-stream',
-            'Cache-Control': 'no-cache',
-            Connection: 'keep-alive'
-          })
-        }
-        if (!responseStream.destroyed) {
-          // 发送 SSE 错误事件
-          responseStream.write('event: error\n')
-          responseStream.write(
-            `data: ${JSON.stringify({
-              error: 'Request timeout',
-              code: 'TIMEOUT',
-              timestamp: new Date().toISOString()
-            })}\n\n`
-          )
-          responseStream.end()
-        }
-        reject(new Error('Request timeout'))
-      })
-
-      // 处理客户端断开连接
-      responseStream.on('close', () => {
-        logger.debug('🔌 Client disconnected, cleaning up stream')
-        if (!req.destroyed) {
-          req.destroy()
-        }
-      })
-
-      // 写入请求体
-      req.write(JSON.stringify(body))
+      req.write(JSON.stringify(requestPayload))
       req.end()
     })
   }

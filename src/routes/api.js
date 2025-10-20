@@ -11,7 +11,7 @@ const logger = require('../utils/logger')
 const { getEffectiveModel, parseVendorPrefixedModel } = require('../utils/modelHelper')
 const sessionHelper = require('../utils/sessionHelper')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
-
+const { sanitizeUpstreamError } = require('../utils/errorSanitizer')
 const router = express.Router()
 
 function queueRateLimitUpdate(rateLimitInfo, usageSummary, model, context = '') {
@@ -756,40 +756,23 @@ router.post('/v1/messages', authenticateApiKey, handleMessagesRequest)
 // 🚀 Claude API messages 端点 - /claude/v1/messages (别名)
 router.post('/claude/v1/messages', authenticateApiKey, handleMessagesRequest)
 
-// 📋 模型列表端点 - Claude Code 客户端需要
+// 📋 模型列表端点 - 支持 Claude, OpenAI, Gemini
 router.get('/v1/models', authenticateApiKey, async (req, res) => {
   try {
-    // 返回支持的模型列表
-    const models = [
-      {
-        id: 'claude-3-5-sonnet-20241022',
-        object: 'model',
-        created: 1669599635,
-        owned_by: 'anthropic'
-      },
-      {
-        id: 'claude-3-5-haiku-20241022',
-        object: 'model',
-        created: 1669599635,
-        owned_by: 'anthropic'
-      },
-      {
-        id: 'claude-3-opus-20240229',
-        object: 'model',
-        created: 1669599635,
-        owned_by: 'anthropic'
-      },
-      {
-        id: 'claude-sonnet-4-20250514',
-        object: 'model',
-        created: 1669599635,
-        owned_by: 'anthropic'
-      }
-    ]
+    const modelService = require('../services/modelService')
+
+    // 从 modelService 获取所有支持的模型
+    const models = modelService.getAllModels()
+
+    // 可选：根据 API Key 的模型限制过滤
+    let filteredModels = models
+    if (req.apiKey.enableModelRestriction && req.apiKey.restrictedModels?.length > 0) {
+      filteredModels = models.filter((model) => req.apiKey.restrictedModels.includes(model.id))
+    }
 
     res.json({
       object: 'list',
-      data: models
+      data: filteredModels
     })
   } catch (error) {
     logger.error('❌ Models list error:', error)
@@ -999,7 +982,13 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
     // 尝试解析并返回JSON响应
     try {
       const jsonData = JSON.parse(response.body)
-      res.json(jsonData)
+      // 对于非 2xx 响应，清理供应商特定信息
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        const sanitizedData = sanitizeUpstreamError(jsonData)
+        res.json(sanitizedData)
+      } else {
+        res.json(jsonData)
+      }
     } catch (parseError) {
       res.send(response.body)
     }

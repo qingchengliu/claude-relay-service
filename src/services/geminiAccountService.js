@@ -42,19 +42,6 @@ function generateEncryptionKey() {
   return _encryptionKeyCache
 }
 
-function normalizeSubscriptionExpiresAt(value) {
-  if (value === undefined || value === null || value === '') {
-    return ''
-  }
-
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) {
-    return ''
-  }
-
-  return date.toISOString()
-}
-
 // Gemini 账户键前缀
 const GEMINI_ACCOUNT_KEY_PREFIX = 'gemini_account:'
 const SHARED_GEMINI_ACCOUNTS_KEY = 'shared_gemini_accounts'
@@ -346,10 +333,6 @@ async function createAccount(accountData) {
   let refreshToken = ''
   let expiresAt = ''
 
-  const subscriptionExpiresAt = normalizeSubscriptionExpiresAt(
-    accountData.subscriptionExpiresAt || ''
-  )
-
   if (accountData.geminiOauth || accountData.accessToken) {
     // 如果提供了完整的 OAuth 数据
     if (accountData.geminiOauth) {
@@ -401,9 +384,12 @@ async function createAccount(accountData) {
     geminiOauth: geminiOauth ? encrypt(geminiOauth) : '',
     accessToken: accessToken ? encrypt(accessToken) : '',
     refreshToken: refreshToken ? encrypt(refreshToken) : '',
-    expiresAt,
+    expiresAt, // OAuth Token 过期时间（技术字段，自动刷新）
     // 只有OAuth方式才有scopes，手动添加的没有
     scopes: accountData.geminiOauth ? accountData.scopes || OAUTH_SCOPES.join(' ') : '',
+
+    // ✅ 新增：账户订阅到期时间（业务字段，手动管理）
+    subscriptionExpiresAt: accountData.subscriptionExpiresAt || null,
 
     // 代理设置
     proxy: accountData.proxy ? JSON.stringify(accountData.proxy) : '',
@@ -421,8 +407,7 @@ async function createAccount(accountData) {
     createdAt: now,
     updatedAt: now,
     lastUsedAt: '',
-    lastRefreshAt: '',
-    subscriptionExpiresAt
+    lastRefreshAt: ''
   }
 
   // 保存到 Redis
@@ -444,10 +429,6 @@ async function createAccount(accountData) {
     } catch (e) {
       returnAccount.proxy = null
     }
-  }
-
-  if (!returnAccount.subscriptionExpiresAt) {
-    returnAccount.subscriptionExpiresAt = null
   }
 
   return returnAccount
@@ -486,10 +467,6 @@ async function getAccount(accountId) {
   // 转换 schedulable 字符串为布尔值（与 claudeConsoleAccountService 保持一致）
   accountData.schedulable = accountData.schedulable !== 'false' // 默认为true，只有明确设置为'false'才为false
 
-  if (!accountData.subscriptionExpiresAt) {
-    accountData.subscriptionExpiresAt = null
-  }
-
   return accountData
 }
 
@@ -502,10 +479,6 @@ async function updateAccount(accountId, updates) {
 
   const now = new Date().toISOString()
   updates.updatedAt = now
-
-  if (Object.prototype.hasOwnProperty.call(updates, 'subscriptionExpiresAt')) {
-    updates.subscriptionExpiresAt = normalizeSubscriptionExpiresAt(updates.subscriptionExpiresAt)
-  }
 
   // 检查是否新增了 refresh token
   // existingAccount.refreshToken 已经是解密后的值了（从 getAccount 返回）
@@ -551,13 +524,21 @@ async function updateAccount(accountId, updates) {
     }
   }
 
-  // 如果新增了 refresh token，更新过期时间为10分钟
+  // ✅ 关键：如果新增了 refresh token，只更新 token 过期时间
+  // 不要覆盖 subscriptionExpiresAt
   if (needUpdateExpiry) {
     const newExpiry = new Date(Date.now() + 10 * 60 * 1000).toISOString()
-    updates.expiresAt = newExpiry
+    updates.expiresAt = newExpiry // 只更新 OAuth Token 过期时间
+    // ⚠️ 重要：不要修改 subscriptionExpiresAt
     logger.info(
-      `🔄 New refresh token added for Gemini account ${accountId}, setting expiry to 10 minutes`
+      `🔄 New refresh token added for Gemini account ${accountId}, setting token expiry to 10 minutes`
     )
+  }
+
+  // ✅ 如果通过路由映射更新了 subscriptionExpiresAt，直接保存
+  // subscriptionExpiresAt 是业务字段，与 token 刷新独立
+  if (updates.subscriptionExpiresAt !== undefined) {
+    // 直接保存，不做任何调整
   }
 
   // 如果通过 geminiOauth 更新，也要检查是否新增了 refresh token
@@ -614,10 +595,6 @@ async function updateAccount(accountId, updates) {
     } catch (e) {
       updatedAccount.proxy = null
     }
-  }
-
-  if (!updatedAccount.subscriptionExpiresAt) {
-    updatedAccount.subscriptionExpiresAt = null
   }
 
   return updatedAccount
@@ -677,13 +654,25 @@ async function getAllAccounts() {
       // 转换 schedulable 字符串为布尔值（与 getAccount 保持一致）
       accountData.schedulable = accountData.schedulable !== 'false' // 默认为true，只有明确设置为'false'才为false
 
+      const tokenExpiresAt = accountData.expiresAt || null
+      const subscriptionExpiresAt =
+        accountData.subscriptionExpiresAt && accountData.subscriptionExpiresAt !== ''
+          ? accountData.subscriptionExpiresAt
+          : null
+
       // 不解密敏感字段，只返回基本信息
       accounts.push({
         ...accountData,
         geminiOauth: accountData.geminiOauth ? '[ENCRYPTED]' : '',
         accessToken: accountData.accessToken ? '[ENCRYPTED]' : '',
         refreshToken: accountData.refreshToken ? '[ENCRYPTED]' : '',
-        subscriptionExpiresAt: accountData.subscriptionExpiresAt || null,
+
+        // ✅ 前端显示订阅过期时间（业务字段）
+        // 注意：前端看到的 expiresAt 实际上是 subscriptionExpiresAt
+        tokenExpiresAt,
+        subscriptionExpiresAt,
+        expiresAt: subscriptionExpiresAt,
+
         // 添加 scopes 字段用于判断认证方式
         // 处理空字符串和默认值的情况
         scopes:
@@ -762,8 +751,17 @@ async function selectAvailableAccount(apiKeyId, sessionHash = null) {
 
   for (const accountId of sharedAccountIds) {
     const account = await getAccount(accountId)
-    if (account && account.isActive === 'true' && !isRateLimited(account)) {
+    if (
+      account &&
+      account.isActive === 'true' &&
+      !isRateLimited(account) &&
+      !isSubscriptionExpired(account)
+    ) {
       availableAccounts.push(account)
+    } else if (account && isSubscriptionExpired(account)) {
+      logger.debug(
+        `⏰ Skipping expired Gemini account: ${account.name}, expired at ${account.subscriptionExpiresAt}`
+      )
     }
   }
 
@@ -816,6 +814,19 @@ function isTokenExpired(account) {
   const buffer = 10 * 1000 // 10秒缓冲
 
   return now >= expiryTime - buffer
+}
+
+/**
+ * 检查账户订阅是否过期
+ * @param {Object} account - 账户对象
+ * @returns {boolean} - true: 已过期, false: 未过期
+ */
+function isSubscriptionExpired(account) {
+  if (!account.subscriptionExpiresAt) {
+    return false // 未设置视为永不过期
+  }
+  const expiryDate = new Date(account.subscriptionExpiresAt)
+  return expiryDate <= new Date()
 }
 
 // 检查账户是否被限流
@@ -1037,6 +1048,7 @@ async function getOauthClient(accessToken, refreshToken, proxyConfig = null) {
 
   // 验证凭据本地有效性
   const { token } = await client.getAccessToken()
+
   if (!token) {
     return false
   }
@@ -1055,6 +1067,54 @@ async function loadCodeAssist(client, projectId = null, proxyConfig = null) {
   const CODE_ASSIST_API_VERSION = 'v1internal'
 
   const { token } = await client.getAccessToken()
+  const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
+
+  const tokenInfoConfig = {
+    url: 'https://oauth2.googleapis.com/tokeninfo',
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/x-www-form-urlencoded'
+    },
+    data: new URLSearchParams({ access_token: token }).toString(),
+    timeout: 15000
+  }
+
+  if (proxyAgent) {
+    tokenInfoConfig.httpAgent = proxyAgent
+    tokenInfoConfig.httpsAgent = proxyAgent
+    tokenInfoConfig.proxy = false
+  }
+
+  try {
+    await axios(tokenInfoConfig)
+    logger.info('📋 tokeninfo 接口验证成功')
+  } catch (error) {
+    logger.info('tokeninfo 接口获取失败', error)
+  }
+
+  const userInfoConfig = {
+    url: 'https://www.googleapis.com/oauth2/v2/userinfo',
+    method: 'GET',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      Accept: '*/*'
+    },
+    timeout: 15000
+  }
+
+  if (proxyAgent) {
+    userInfoConfig.httpAgent = proxyAgent
+    userInfoConfig.httpsAgent = proxyAgent
+    userInfoConfig.proxy = false
+  }
+
+  try {
+    await axios(userInfoConfig)
+    logger.info('📋 userinfo 接口获取成功')
+  } catch (error) {
+    logger.info('userinfo 接口获取失败', error)
+  }
 
   // 创建ClientMetadata
   const clientMetadata = {
@@ -1089,9 +1149,10 @@ async function loadCodeAssist(client, projectId = null, proxyConfig = null) {
   }
 
   // 添加代理配置
-  const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
   if (proxyAgent) {
+    axiosConfig.httpAgent = proxyAgent
     axiosConfig.httpsAgent = proxyAgent
+    axiosConfig.proxy = false
     logger.info(
       `🌐 Using proxy for Gemini loadCodeAssist: ${ProxyHelper.getProxyDescription(proxyConfig)}`
     )
@@ -1165,7 +1226,9 @@ async function onboardUser(client, tierId, projectId, clientMetadata, proxyConfi
   // 添加代理配置
   const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
   if (proxyAgent) {
+    baseAxiosConfig.httpAgent = proxyAgent
     baseAxiosConfig.httpsAgent = proxyAgent
+    baseAxiosConfig.proxy = false
     logger.info(
       `🌐 Using proxy for Gemini onboardUser: ${ProxyHelper.getProxyDescription(proxyConfig)}`
     )
@@ -1296,7 +1359,9 @@ async function countTokens(client, contents, model = 'gemini-2.0-flash-exp', pro
   // 添加代理配置
   const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
   if (proxyAgent) {
+    axiosConfig.httpAgent = proxyAgent
     axiosConfig.httpsAgent = proxyAgent
+    axiosConfig.proxy = false
     logger.info(
       `🌐 Using proxy for Gemini countTokens: ${ProxyHelper.getProxyDescription(proxyConfig)}`
     )
@@ -1371,7 +1436,9 @@ async function generateContent(
   // 添加代理配置
   const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
   if (proxyAgent) {
+    axiosConfig.httpAgent = proxyAgent
     axiosConfig.httpsAgent = proxyAgent
+    axiosConfig.proxy = false
     logger.info(
       `🌐 Using proxy for Gemini generateContent: ${ProxyHelper.getProxyDescription(proxyConfig)}`
     )
@@ -1445,7 +1512,9 @@ async function generateContentStream(
   // 添加代理配置
   const proxyAgent = ProxyHelper.createProxyAgent(proxyConfig)
   if (proxyAgent) {
+    axiosConfig.httpAgent = proxyAgent
     axiosConfig.httpsAgent = proxyAgent
+    axiosConfig.proxy = false
     logger.info(
       `🌐 Using proxy for Gemini streamGenerateContent: ${ProxyHelper.getProxyDescription(proxyConfig)}`
     )

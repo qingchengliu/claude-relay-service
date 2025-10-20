@@ -332,6 +332,7 @@ const handleResponses = async (req, res) => {
 
     // 如果有代理，添加代理配置
     if (proxyAgent) {
+      axiosConfig.httpAgent = proxyAgent
       axiosConfig.httpsAgent = proxyAgent
       axiosConfig.proxy = false
       logger.info(`🌐 Using proxy for OpenAI request: ${ProxyHelper.getProxyDescription(proxy)}`)
@@ -919,3 +920,4 @@ router.get('/key-info', authenticateApiKey, async (req, res) => {
 })
 
 module.exports = router
+module.exports.handleResponses = handleResponses
