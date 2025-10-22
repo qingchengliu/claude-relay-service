@@ -55,6 +55,18 @@ function extractEditStatistics(response) {
         continue
       }
 
+      const normalizedFileType =
+        typeof singleResult.fileType === 'string'
+          ? singleResult.fileType.trim().toLowerCase()
+          : null
+
+      const isTargetFile =
+        normalizedFileType && isCodeFileExtension(normalizedFileType)
+
+      if (!isTargetFile) {
+        continue
+      }
+
       const editedLines = singleResult.lines || 0
       const operations = singleResult.operations || 0
 
@@ -67,9 +79,9 @@ function extractEditStatistics(response) {
         stats.modifiedFiles++
       }
 
-      if (singleResult.fileType) {
-        stats.fileTypes[singleResult.fileType] =
-          (stats.fileTypes[singleResult.fileType] || 0) + editedLines
+      if (normalizedFileType) {
+        stats.fileTypes[normalizedFileType] =
+          (stats.fileTypes[normalizedFileType] || 0) + editedLines
       }
 
       if (singleResult.language) {
@@ -645,6 +657,7 @@ function detectLanguage(filePath, content) {
     md: 'markdown',
     markdown: 'markdown',
     rst: 'rst',
+    json: 'json',
 
     // Database
     sql: 'sql'
@@ -1189,7 +1202,7 @@ function isCodeFileExtension(extension) {
   const webFiles = ['html', 'htm', 'css', 'scss', 'sass', 'less', 'vue', 'svelte']
 
   // 文档和标记语言
-  const documentFiles = ['md', 'markdown', 'rst', 'adoc']
+  const documentFiles = ['md', 'markdown', 'rst', 'adoc', 'json']
 
   // 数据库相关
   const databaseFiles = ['sql', 'graphql', 'gql']
@@ -1278,6 +1291,7 @@ function detectLanguageFromExtension(extension, filePath = null) {
     markdown: 'markdown',
     rst: 'rst',
     adoc: 'asciidoc',
+    json: 'json',
 
     // 数据库
     sql: 'sql',
