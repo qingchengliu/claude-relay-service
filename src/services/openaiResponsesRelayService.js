@@ -296,7 +296,6 @@ class OpenAIResponsesRelayService {
       // 检查是否是网络错误
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
         logger.warn('🔌 Network error detected, disabling OpenAI-Responses account', {
-          accountId: account.id,
           accountName: account.name,
           errorCode: error.code,
           errorMessage: error.message,
@@ -308,10 +307,10 @@ class OpenAIResponsesRelayService {
           }
         })
 
-        await openaiResponsesAccountService.updateAccount(account.id, {
-          status: 'error',
-          errorMessage: `Connection error: ${error.code}`
-        })
+        // await openaiResponsesAccountService.updateAccount(account.id, {
+        //   status: 'error',
+        //   errorMessage: `Connection error: ${error.code}`
+        // })
       }
 
       // 如果已经发送了响应头，直接结束
