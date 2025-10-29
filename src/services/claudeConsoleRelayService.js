@@ -228,15 +228,8 @@ class ClaudeConsoleRelayService {
       }
 
       // 根据 API Key 格式选择认证方式
-      if (account.apiKey && account.apiKey.startsWith('sk-ant-')) {
-        // Anthropic 官方 API Key 使用 x-api-key
-        requestConfig.headers['x-api-key'] = account.apiKey
-        logger.debug('[DEBUG] Using x-api-key authentication for sk-ant-* API key')
-      } else {
-        // 其他 API Key 使用 Authorization Bearer
-        requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
-        logger.debug('[DEBUG] Using Authorization Bearer authentication')
-      }
+      requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
+      logger.debug('[DEBUG] Using Authorization Bearer authentication')
 
       logger.debug(
         `[DEBUG] Initial headers before beta: ${JSON.stringify(requestConfig.headers, null, 2)}`
