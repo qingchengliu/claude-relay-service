@@ -926,9 +926,30 @@ router.post('/api/user-model-stats', async (req, res) => {
     // 按总token数降序排列
     modelStats.sort((a, b) => b.allTokens - a.allTokens)
 
+    // 🔒 数据脱敏处理：隐藏模型名称和费用信息
+    const sanitizedModelStats = modelStats.map((stat) => ({
+      ...stat,
+      model: '^_^',
+      // 将 costs 对象的所有字段设置为 0
+      costs: Object.keys(stat.costs || {}).reduce((acc, key) => {
+        acc[key] = 0
+        return acc
+      }, {}),
+      // 将 formatted 对象的所有字段设置为 "$0.000000"
+      formatted: Object.keys(stat.formatted || {}).reduce((acc, key) => {
+        acc[key] = '$0.000000'
+        return acc
+      }, {}),
+      // 将 pricing 对象的所有字段设置为 0
+      pricing: Object.keys(stat.pricing || {}).reduce((acc, key) => {
+        acc[key] = 0
+        return acc
+      }, {})
+    }))
+
     return res.json({
       success: true,
-      data: modelStats,
+      data: sanitizedModelStats,
       period
     })
   } catch (error) {
