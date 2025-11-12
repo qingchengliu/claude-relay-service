@@ -760,28 +760,14 @@ class CodeStatsScreenshotScheduler:
         logger.info("启动定时任务调度器")
         
         # 配置定时任务
-        schedule.every().monday.at("15:30").do(self._execute_task, 'today')
-        schedule.every().monday.at("18:30").do(self._execute_task, 'today')
         schedule.every().monday.at("21:30").do(self._execute_task, 'today')
-        
-        schedule.every().tuesday.at("15:30").do(self._execute_task, 'today')
-        schedule.every().tuesday.at("18:30").do(self._execute_task, 'today')
         schedule.every().tuesday.at("21:30").do(self._execute_task, 'today')
-        
-        schedule.every().wednesday.at("15:30").do(self._execute_task, 'today')
-        schedule.every().wednesday.at("18:30").do(self._execute_task, 'today')
         schedule.every().wednesday.at("21:30").do(self._execute_task, 'today')
-        
-        schedule.every().thursday.at("15:30").do(self._execute_task, 'today')
-        schedule.every().thursday.at("18:30").do(self._execute_task, 'today')
         schedule.every().thursday.at("21:30").do(self._execute_task, 'today')
-        
-        schedule.every().friday.at("15:30").do(self._execute_task, 'today')
-        schedule.every().friday.at("18:30").do(self._execute_task, 'today')
+
         schedule.every().friday.at("21:30").do(self._execute_task, 'week')  # 周五21:30生成周报
         
         logger.info("定时任务配置完成:")
-        logger.info("- 周一到周五 15:30, 18:30: 今日统计")
         logger.info("- 周一到周四 21:30: 今日统计")
         logger.info("- 周五 21:30: 近7天统计")
         
