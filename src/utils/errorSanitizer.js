@@ -29,6 +29,7 @@ function sanitizeErrorMessage(message) {
   cleaned = cleaned.replace(/ikun\S*/gi, '')
   cleaned = cleaned.replace(/privnode\S*/gi, '')
   cleaned = cleaned.replace(/yescode\S*/gi, '')
+  cleaned = cleaned.replace(/yes.vg\S*/gi, '')
   cleaned = cleaned.replace(/share\S*/gi, '')
   cleaned = cleaned.replace(/yhlxj\S*/gi, '')
   cleaned = cleaned.replace(/gac\S*/gi, '')
@@ -64,7 +65,8 @@ function sanitizeUpstreamError(errorData) {
     }
 
     for (const key in obj) {
-      if (key === 'message' && typeof obj[key] === 'string') {
+      // 清理所有字符串字段，不仅仅是 message
+      if (typeof obj[key] === 'string') {
         obj[key] = sanitizeErrorMessage(obj[key])
       } else if (typeof obj[key] === 'object') {
         sanitizeObject(obj[key])

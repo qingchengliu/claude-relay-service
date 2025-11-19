@@ -714,7 +714,7 @@ class RedisClient {
     const dailyKey = `usage:cost:daily:${keyId}:${today}`
     const monthlyKey = `usage:cost:monthly:${keyId}:${currentMonth}`
     const hourlyKey = `usage:cost:hourly:${keyId}:${currentHour}`
-    const totalKey = `usage:cost:total:${keyId}`
+    const totalKey = `usage:cost:total:${keyId}` // 总费用键 - 永不过期，持续累加
 
     logger.debug(
       `💰 Incrementing cost for ${keyId}, amount: $${amount}, date: ${today}, dailyKey: ${dailyKey}`
@@ -724,8 +724,8 @@ class RedisClient {
       this.client.incrbyfloat(dailyKey, amount),
       this.client.incrbyfloat(monthlyKey, amount),
       this.client.incrbyfloat(hourlyKey, amount),
-      this.client.incrbyfloat(totalKey, amount),
-      // 设置过期时间
+      this.client.incrbyfloat(totalKey, amount), // ✅ 累加到总费用（永不过期）
+      // 设置过期时间（注意：totalKey 不设置过期时间，保持永久累计）
       this.client.expire(dailyKey, 86400 * 30), // 30天
       this.client.expire(monthlyKey, 86400 * 90), // 90天
       this.client.expire(hourlyKey, 86400 * 7) // 7天
@@ -1773,6 +1773,38 @@ class RedisClient {
       logger.error('❌ Failed to get concurrency:', error)
       return 0
     }
+  }
+
+  // 🏢 Claude Console 账户并发控制（复用现有并发机制）
+  // 增加 Console 账户并发计数
+  async incrConsoleAccountConcurrency(accountId, requestId, leaseSeconds = null) {
+    if (!requestId) {
+      throw new Error('Request ID is required for console account concurrency tracking')
+    }
+    // 使用特殊的 key 前缀区分 Console 账户并发
+    const compositeKey = `console_account:${accountId}`
+    return await this.incrConcurrency(compositeKey, requestId, leaseSeconds)
+  }
+
+  // 刷新 Console 账户并发租约
+  async refreshConsoleAccountConcurrencyLease(accountId, requestId, leaseSeconds = null) {
+    if (!requestId) {
+      return 0
+    }
+    const compositeKey = `console_account:${accountId}`
+    return await this.refreshConcurrencyLease(compositeKey, requestId, leaseSeconds)
+  }
+
+  // 减少 Console 账户并发计数
+  async decrConsoleAccountConcurrency(accountId, requestId) {
+    const compositeKey = `console_account:${accountId}`
+    return await this.decrConcurrency(compositeKey, requestId)
+  }
+
+  // 获取 Console 账户当前并发数
+  async getConsoleAccountConcurrency(accountId) {
+    const compositeKey = `console_account:${accountId}`
+    return await this.getConcurrency(compositeKey)
   }
 
   // 🔧 Basic Redis operations wrapper methods for convenience
