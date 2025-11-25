@@ -6407,9 +6407,11 @@ router.get('/api-keys-usage-trend', authenticateAdmin, async (req, res) => {
 // 计算总体使用费用
 router.get('/usage-costs', authenticateAdmin, async (req, res) => {
   try {
-    const { period = 'all' } = req.query // all, today, monthly, 7days
+    const { period = 'all', startDate, endDate } = req.query // all, today, monthly, 7days, 30days, custom
 
-    logger.info(`💰 Calculating usage costs for period: ${period}`)
+    logger.info(
+      `💰 Calculating usage costs for period: ${period}, startDate: ${startDate}, endDate: ${endDate}`
+    )
 
     // 模型名标准化函数（与redis.js保持一致）
     const normalizeModelName = (model) => {
@@ -6543,6 +6545,209 @@ router.get('/usage-costs', authenticateAdmin, async (req, res) => {
         success: true,
         data: {
           period,
+          totalCosts: {
+            ...totalCosts,
+            formatted: {
+              inputCost: CostCalculator.formatCost(totalCosts.inputCost),
+              outputCost: CostCalculator.formatCost(totalCosts.outputCost),
+              cacheCreateCost: CostCalculator.formatCost(totalCosts.cacheCreateCost),
+              cacheReadCost: CostCalculator.formatCost(totalCosts.cacheReadCost),
+              totalCost: CostCalculator.formatCost(totalCosts.totalCost)
+            }
+          },
+          modelCosts: Object.values(modelCosts)
+        }
+      })
+    } else if (period === '30days') {
+      // 最近30天：汇总daily数据
+      const modelUsageMap = new Map()
+
+      // 获取最近30天的所有daily统计数据
+      for (let i = 0; i < 30; i++) {
+        const date = new Date()
+        date.setDate(date.getDate() - i)
+        const currentTzDate = redis.getDateInTimezone(date)
+        const dateStr = `${currentTzDate.getUTCFullYear()}-${String(
+          currentTzDate.getUTCMonth() + 1
+        ).padStart(2, '0')}-${String(currentTzDate.getUTCDate()).padStart(2, '0')}`
+        const dayPattern = `usage:model:daily:*:${dateStr}`
+
+        const dayKeys = await client.keys(dayPattern)
+
+        for (const key of dayKeys) {
+          const modelMatch = key.match(/usage:model:daily:(.+):\d{4}-\d{2}-\d{2}$/)
+          if (!modelMatch) {
+            continue
+          }
+
+          const rawModel = modelMatch[1]
+          const normalizedModel = normalizeModelName(rawModel)
+          const data = await client.hgetall(key)
+
+          if (data && Object.keys(data).length > 0) {
+            if (!modelUsageMap.has(normalizedModel)) {
+              modelUsageMap.set(normalizedModel, {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreateTokens: 0,
+                cacheReadTokens: 0
+              })
+            }
+
+            const modelUsage = modelUsageMap.get(normalizedModel)
+            modelUsage.inputTokens += parseInt(data.inputTokens) || 0
+            modelUsage.outputTokens += parseInt(data.outputTokens) || 0
+            modelUsage.cacheCreateTokens += parseInt(data.cacheCreateTokens) || 0
+            modelUsage.cacheReadTokens += parseInt(data.cacheReadTokens) || 0
+          }
+        }
+      }
+
+      // 计算30天统计的费用
+      logger.info(`💰 Processing ${modelUsageMap.size} unique models for 30days cost calculation`)
+
+      for (const [model, usage] of modelUsageMap) {
+        const usageData = {
+          input_tokens: usage.inputTokens,
+          output_tokens: usage.outputTokens,
+          cache_creation_input_tokens: usage.cacheCreateTokens,
+          cache_read_input_tokens: usage.cacheReadTokens
+        }
+
+        const costResult = CostCalculator.calculateCost(usageData, model)
+        totalCosts.inputCost += costResult.costs.input
+        totalCosts.outputCost += costResult.costs.output
+        totalCosts.cacheCreateCost += costResult.costs.cacheWrite
+        totalCosts.cacheReadCost += costResult.costs.cacheRead
+        totalCosts.totalCost += costResult.costs.total
+
+        logger.info(
+          `💰 Model ${model} (30days): ${
+            usage.inputTokens + usage.outputTokens + usage.cacheCreateTokens + usage.cacheReadTokens
+          } tokens, cost: ${costResult.formatted.total}`
+        )
+
+        // 记录模型费用
+        modelCosts[model] = {
+          model,
+          requests: 0, // 30天汇总数据没有请求数统计
+          usage: usageData,
+          costs: costResult.costs,
+          formatted: costResult.formatted,
+          usingDynamicPricing: costResult.usingDynamicPricing
+        }
+      }
+
+      // 返回30天统计结果
+      return res.json({
+        success: true,
+        data: {
+          period,
+          totalCosts: {
+            ...totalCosts,
+            formatted: {
+              inputCost: CostCalculator.formatCost(totalCosts.inputCost),
+              outputCost: CostCalculator.formatCost(totalCosts.outputCost),
+              cacheCreateCost: CostCalculator.formatCost(totalCosts.cacheCreateCost),
+              cacheReadCost: CostCalculator.formatCost(totalCosts.cacheReadCost),
+              totalCost: CostCalculator.formatCost(totalCosts.totalCost)
+            }
+          },
+          modelCosts: Object.values(modelCosts)
+        }
+      })
+    } else if (period === 'custom' && startDate && endDate) {
+      // 自定义日期范围：汇总指定日期范围内的daily数据
+      const modelUsageMap = new Map()
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      const days = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+
+      // 获取自定义日期范围内的所有daily统计数据
+      for (let i = 0; i < days; i++) {
+        const date = new Date(start)
+        date.setDate(date.getDate() + i)
+        const currentTzDate = redis.getDateInTimezone(date)
+        const dateStr = `${currentTzDate.getUTCFullYear()}-${String(
+          currentTzDate.getUTCMonth() + 1
+        ).padStart(2, '0')}-${String(currentTzDate.getUTCDate()).padStart(2, '0')}`
+        const dayPattern = `usage:model:daily:*:${dateStr}`
+
+        const dayKeys = await client.keys(dayPattern)
+
+        for (const key of dayKeys) {
+          const modelMatch = key.match(/usage:model:daily:(.+):\d{4}-\d{2}-\d{2}$/)
+          if (!modelMatch) {
+            continue
+          }
+
+          const rawModel = modelMatch[1]
+          const normalizedModel = normalizeModelName(rawModel)
+          const data = await client.hgetall(key)
+
+          if (data && Object.keys(data).length > 0) {
+            if (!modelUsageMap.has(normalizedModel)) {
+              modelUsageMap.set(normalizedModel, {
+                inputTokens: 0,
+                outputTokens: 0,
+                cacheCreateTokens: 0,
+                cacheReadTokens: 0
+              })
+            }
+
+            const modelUsage = modelUsageMap.get(normalizedModel)
+            modelUsage.inputTokens += parseInt(data.inputTokens) || 0
+            modelUsage.outputTokens += parseInt(data.outputTokens) || 0
+            modelUsage.cacheCreateTokens += parseInt(data.cacheCreateTokens) || 0
+            modelUsage.cacheReadTokens += parseInt(data.cacheReadTokens) || 0
+          }
+        }
+      }
+
+      // 计算自定义日期范围的费用
+      logger.info(
+        `💰 Processing ${modelUsageMap.size} unique models for custom date range cost calculation`
+      )
+
+      for (const [model, usage] of modelUsageMap) {
+        const usageData = {
+          input_tokens: usage.inputTokens,
+          output_tokens: usage.outputTokens,
+          cache_creation_input_tokens: usage.cacheCreateTokens,
+          cache_read_input_tokens: usage.cacheReadTokens
+        }
+
+        const costResult = CostCalculator.calculateCost(usageData, model)
+        totalCosts.inputCost += costResult.costs.input
+        totalCosts.outputCost += costResult.costs.output
+        totalCosts.cacheCreateCost += costResult.costs.cacheWrite
+        totalCosts.cacheReadCost += costResult.costs.cacheRead
+        totalCosts.totalCost += costResult.costs.total
+
+        logger.info(
+          `💰 Model ${model} (custom: ${startDate} to ${endDate}): ${
+            usage.inputTokens + usage.outputTokens + usage.cacheCreateTokens + usage.cacheReadTokens
+          } tokens, cost: ${costResult.formatted.total}`
+        )
+
+        // 记录模型费用
+        modelCosts[model] = {
+          model,
+          requests: 0, // 自定义范围汇总数据没有请求数统计
+          usage: usageData,
+          costs: costResult.costs,
+          formatted: costResult.formatted,
+          usingDynamicPricing: costResult.usingDynamicPricing
+        }
+      }
+
+      // 返回自定义日期范围统计结果
+      return res.json({
+        success: true,
+        data: {
+          period,
+          startDate,
+          endDate,
           totalCosts: {
             ...totalCosts,
             formatted: {

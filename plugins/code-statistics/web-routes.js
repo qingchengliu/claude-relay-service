@@ -28,9 +28,19 @@ apiRouter.get('/:keyId', async (req, res) => {
 // 管理员路由 - 获取系统级代码统计
 adminRouter.get('/system', authenticateAdmin, async (req, res) => {
   try {
-    const { days = 30 } = req.query
+    const { days = 30, startDate, endDate } = req.query
 
-    const stats = await redisExtension.getSystemEditStatistics(parseInt(days))
+    let daysNum
+    if (startDate && endDate) {
+      // 计算自定义日期范围的天数
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      daysNum = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+    } else {
+      daysNum = parseInt(days)
+    }
+
+    const stats = await redisExtension.getSystemEditStatistics(daysNum)
 
     res.json({
       success: true,
@@ -47,9 +57,19 @@ adminRouter.get('/system', authenticateAdmin, async (req, res) => {
 // 管理员路由 - 获取语言统计
 adminRouter.get('/languages', authenticateAdmin, async (req, res) => {
   try {
-    const { days = 30 } = req.query
+    const { days = 30, startDate, endDate } = req.query
 
-    const stats = await redisExtension.getLanguageStatistics(parseInt(days))
+    let daysNum
+    if (startDate && endDate) {
+      // 计算自定义日期范围的天数
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      daysNum = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+    } else {
+      daysNum = parseInt(days)
+    }
+
+    const stats = await redisExtension.getLanguageStatistics(daysNum)
 
     res.json({
       success: true,
@@ -72,6 +92,8 @@ adminRouter.get('/leaderboard', authenticateAdmin, async (req, res) => {
       days,
       month,
       all,
+      startDate,
+      endDate,
       sortBy = 'totalEditedLines',
       sortOrder = 'desc'
     } = req.query
@@ -88,6 +110,20 @@ adminRouter.get('/leaderboard', authenticateAdmin, async (req, res) => {
       // 获取当月排行榜
       const result = await redisExtension.getLeaderboardByMonth(
         0,
+        offset,
+        limitNumber,
+        sortBy,
+        sortOrder
+      )
+      ;({ data: leaderboard, total } = result)
+    } else if (startDate && endDate) {
+      // 使用自定义日期范围
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      const daysNum = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+      const result = await redisExtension.getLeaderboardByDays(
+        0,
+        daysNum,
         offset,
         limitNumber,
         sortBy,
@@ -129,8 +165,21 @@ adminRouter.get('/leaderboard', authenticateAdmin, async (req, res) => {
 // 管理员路由 - 获取活跃人数统计
 adminRouter.get('/active-users', authenticateAdmin, async (req, res) => {
   try {
-    const { days } = req.query
-    const daysNum = days ? parseInt(days) : 1 // 默认当天
+    const { days, month, startDate, endDate } = req.query
+    let daysNum
+
+    if (startDate && endDate) {
+      // 计算自定义日期范围的天数
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      daysNum = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+    } else if (month === 'current') {
+      // 计算当月的天数（从1号到今天）
+      const today = new Date()
+      daysNum = today.getDate() // 当月已过去的天数
+    } else {
+      daysNum = days ? parseInt(days) : 1 // 默认当天
+    }
 
     const activeUsers = await redisExtension.getActiveUsersCount(daysNum)
 
@@ -198,9 +247,19 @@ adminRouter.get('/users/:keyId', authenticateAdmin, async (req, res) => {
 // 管理员路由 - 获取工具调用统计
 adminRouter.get('/tools', authenticateAdmin, async (req, res) => {
   try {
-    const { days = 30 } = req.query
+    const { days = 30, startDate, endDate } = req.query
 
-    const stats = await redisExtension.getToolUsageStatistics(parseInt(days))
+    let daysNum
+    if (startDate && endDate) {
+      // 计算自定义日期范围的天数
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      daysNum = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+    } else {
+      daysNum = parseInt(days)
+    }
+
+    const stats = await redisExtension.getToolUsageStatistics(daysNum)
 
     res.json({
       success: true,
@@ -217,9 +276,19 @@ adminRouter.get('/tools', authenticateAdmin, async (req, res) => {
 // 管理员路由 - 获取工具调用排行榜
 adminRouter.get('/tools/ranking', authenticateAdmin, async (req, res) => {
   try {
-    const { limit = 10, days = 30 } = req.query
+    const { limit = 10, days = 30, startDate, endDate } = req.query
 
-    const ranking = await redisExtension.getTopToolsRanking(parseInt(limit), parseInt(days))
+    let daysNum
+    if (startDate && endDate) {
+      // 计算自定义日期范围的天数
+      const start = new Date(startDate)
+      const end = new Date(endDate)
+      daysNum = Math.ceil((end - start) / (1000 * 60 * 60 * 24)) + 1
+    } else {
+      daysNum = parseInt(days)
+    }
+
+    const ranking = await redisExtension.getTopToolsRanking(parseInt(limit), daysNum)
 
     res.json({
       success: true,

@@ -71,6 +71,49 @@
           </div>
         </div>
 
+        <!-- 自定义日期选择器弹窗 -->
+        <div
+          v-if="showCustomDatePicker"
+          class="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50"
+          @click.self="cancelCustomDateRange"
+        >
+          <div class="w-full max-w-md rounded-lg bg-white p-6 shadow-xl">
+            <h3 class="mb-4 text-lg font-semibold text-gray-900">选择日期范围</h3>
+            <div class="space-y-4">
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">开始日期</label>
+                <input
+                  type="date"
+                  v-model="customDateRange.startDate"
+                  class="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label class="mb-1 block text-sm font-medium text-gray-700">结束日期</label>
+                <input
+                  type="date"
+                  v-model="customDateRange.endDate"
+                  class="w-full rounded-md border border-gray-300 px-3 py-2 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+            <div class="mt-6 flex justify-end gap-3">
+              <button
+                @click="cancelCustomDateRange"
+                class="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                取消
+              </button>
+              <button
+                @click="applyCustomDateRange"
+                class="rounded-md bg-blue-500 px-4 py-2 text-sm font-medium text-white hover:bg-blue-600"
+              >
+                应用
+              </button>
+            </div>
+          </div>
+        </div>
+
         <!-- 统计卡片 -->
         <div class="mb-8 grid grid-cols-1 gap-6 md:grid-cols-2 lg:grid-cols-5">
           <!-- 编辑行数卡片 -->
@@ -829,12 +872,20 @@ const activeUsersCount = ref(0)
 const overviewTimePeriod = ref('today') // 默认今天
 const toolsTimePeriod = ref('today') // 默认今天
 
+// 自定义日期范围
+const customDateRange = ref({
+  startDate: '',
+  endDate: ''
+})
+const showCustomDatePicker = ref(false)
+
 // 时间段选项
 const timePeriodOptions = [
   { value: 'today', label: '当天' },
   { value: '7', label: '近7天' },
   { value: 'month', label: '当月' },
-  { value: '30', label: '近30天' }
+  { value: '30', label: '近30天' },
+  { value: 'custom', label: '自定义' }
 ]
 
 // 排行榜分页和排序相关
@@ -1026,26 +1077,38 @@ async function fetchActiveUsers() {
 async function fetchUsageCosts() {
   try {
     let period = 'today' // 默认值
+    let queryParams = ''
 
     // 将时间段参数转换为API期望的格式
-    switch (overviewTimePeriod.value) {
-      case 'today':
-        period = 'today'
-        break
-      case '7':
-        period = '7days'
-        break
-      case 'month':
-        period = 'monthly'
-        break
-      case '30':
-        period = '30days'
-        break
-      default:
-        period = 'today'
+    if (
+      overviewTimePeriod.value === 'custom' &&
+      customDateRange.value.startDate &&
+      customDateRange.value.endDate
+    ) {
+      // 自定义日期范围
+      period = 'custom'
+      queryParams = `period=${period}&startDate=${customDateRange.value.startDate}&endDate=${customDateRange.value.endDate}`
+    } else {
+      switch (overviewTimePeriod.value) {
+        case 'today':
+          period = 'today'
+          break
+        case '7':
+          period = '7days'
+          break
+        case 'month':
+          period = 'monthly'
+          break
+        case '30':
+          period = '30days'
+          break
+        default:
+          period = 'today'
+      }
+      queryParams = `period=${period}`
     }
 
-    const response = await fetch(`/admin/usage-costs?period=${period}`, {
+    const response = await fetch(`/admin/usage-costs?${queryParams}`, {
       headers: {
         Authorization: `Bearer ${localStorage.getItem('authToken') || ''}`
       }
@@ -1115,6 +1178,13 @@ function getDaysParam(period) {
       return 'month=current'
     case '30':
       return 'days=30'
+    case 'custom':
+      // 自定义日期范围
+      if (customDateRange.value.startDate && customDateRange.value.endDate) {
+        return `startDate=${customDateRange.value.startDate}&endDate=${customDateRange.value.endDate}`
+      }
+      // 如果没有设置自定义日期，回退到近7天
+      return 'days=7'
     case 'all':
       return 'all=true'
     default:
@@ -1125,6 +1195,21 @@ function getDaysParam(period) {
 // 时间段切换 - 全局统计概览
 async function changeOverviewTimePeriod(period) {
   overviewTimePeriod.value = period
+
+  // 如果选择自定义，显示日期选择器
+  if (period === 'custom') {
+    showCustomDatePicker.value = true
+    // 初始化默认日期范围（最近7天）
+    if (!customDateRange.value.startDate || !customDateRange.value.endDate) {
+      const today = new Date()
+      const sevenDaysAgo = new Date(today)
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7)
+      customDateRange.value.endDate = today.toISOString().split('T')[0]
+      customDateRange.value.startDate = sevenDaysAgo.toISOString().split('T')[0]
+    }
+    return // 等待用户选择日期后再刷新数据
+  }
+
   showToast('正在切换时间段...', 'info')
 
   try {
@@ -1710,6 +1795,52 @@ function renderCurrentTabCharts() {
     createToolTrendChart()
     createToolDistributionChart()
   }
+}
+
+// 应用自定义日期范围
+async function applyCustomDateRange() {
+  if (!customDateRange.value.startDate || !customDateRange.value.endDate) {
+    showToast('请选择开始日期和结束日期', 'error')
+    return
+  }
+
+  // 验证日期范围
+  const start = new Date(customDateRange.value.startDate)
+  const end = new Date(customDateRange.value.endDate)
+  if (start > end) {
+    showToast('开始日期不能晚于结束日期', 'error')
+    return
+  }
+
+  // 关闭日期选择器
+  showCustomDatePicker.value = false
+  showToast('正在切换时间段...', 'info')
+
+  try {
+    await Promise.all([
+      fetchSystemStats(),
+      fetchLanguageStats(),
+      fetchLeaderboard(),
+      fetchUsageCosts(),
+      fetchActiveUsers()
+    ])
+
+    await nextTick()
+    createTrendChart()
+    createLanguageChart()
+
+    showToast('时间段切换成功！', 'success')
+  } catch (error) {
+    console.error('Error applying custom date range:', error)
+    showToast('时间段切换失败', 'error')
+  }
+}
+
+// 取消自定义日期选择
+function cancelCustomDateRange() {
+  showCustomDatePicker.value = false
+  // 回退到近7天
+  overviewTimePeriod.value = '7'
 }
 
 // 监听标签页切换，重新渲染图表
