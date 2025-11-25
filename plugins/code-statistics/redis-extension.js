@@ -173,7 +173,7 @@ class CodeStatisticsRedis {
   /**
    * 获取系统级编辑统计
    */
-  async getSystemEditStatistics(days = 30) {
+  async getSystemEditStatistics(days = 30, startDate = null, endDate = null) {
     const stats = {
       daily: [],
       languages: {},
@@ -181,11 +181,28 @@ class CodeStatisticsRedis {
     }
 
     try {
-      const today = new Date()
+      let dateList = []
 
-      for (let i = 0; i < days; i++) {
-        const date = new Date(today)
-        date.setDate(date.getDate() - i)
+      if (startDate && endDate) {
+        // 使用自定义日期范围
+        const start = new Date(startDate)
+        const end = new Date(endDate)
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          dateList.push(new Date(d))
+        }
+      } else {
+        // 使用原来的逻辑：从今天往前推 days 天
+        const today = new Date()
+        for (let i = 0; i < days; i++) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          dateList.push(date)
+        }
+      }
+
+      // 统一处理日期列表
+      for (const date of dateList) {
         const dateString = this.getDateString(date)
 
         const systemDailyKey = `${this.prefix}system:daily:${dateString}`
@@ -207,15 +224,32 @@ class CodeStatisticsRedis {
   /**
    * 获取语言统计数据
    */
-  async getLanguageStatistics(days = 30) {
+  async getLanguageStatistics(days = 30, startDate = null, endDate = null) {
     const stats = {}
 
     try {
-      const today = new Date()
+      let dateList = []
 
-      for (let i = 0; i < days; i++) {
-        const date = new Date(today)
-        date.setDate(date.getDate() - i)
+      if (startDate && endDate) {
+        // 使用自定义日期范围
+        const start = new Date(startDate)
+        const end = new Date(endDate)
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          dateList.push(new Date(d))
+        }
+      } else {
+        // 使用原来的逻辑：从今天往前推 days 天
+        const today = new Date()
+        for (let i = 0; i < days; i++) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          dateList.push(date)
+        }
+      }
+
+      // 统一处理日期列表
+      for (const date of dateList) {
         const dateString = this.getDateString(date)
 
         // 获取所有语言的统计
@@ -329,12 +363,33 @@ class CodeStatisticsRedis {
     offset = 0,
     pageLimit = null,
     sortBy = 'totalEditedLines',
-    sortOrder = 'desc'
+    sortOrder = 'desc',
+    startDate = null,
+    endDate = null
   ) {
     try {
       const keys = await this.redis.getClient().keys(`${this.prefix}key:*`)
       const leaderboard = []
-      const today = new Date()
+
+      // 构建日期列表
+      let dateList = []
+      if (startDate && endDate) {
+        // 使用自定义日期范围
+        const start = new Date(startDate)
+        const end = new Date(endDate)
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          dateList.push(new Date(d))
+        }
+      } else {
+        // 使用原来的逻辑：从今天往前推 days 天
+        const today = new Date()
+        for (let i = 0; i < days; i++) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          dateList.push(date)
+        }
+      }
 
       for (const key of keys) {
         // 只处理基础的用户统计键，过滤掉语言统计键等子键
@@ -357,9 +412,7 @@ class CodeStatisticsRedis {
 
         // 计算活跃天数
         let activeDays = 0
-        for (let i = 0; i < days; i++) {
-          const date = new Date(today)
-          date.setDate(date.getDate() - i)
+        for (const date of dateList) {
           const dateString = this.getDateString(date)
 
           const dailyKey = `${this.prefix}daily:${keyId}:${dateString}`
@@ -675,7 +728,7 @@ class CodeStatisticsRedis {
   /**
    * 获取工具调用统计
    */
-  async getToolUsageStatistics(days = 30) {
+  async getToolUsageStatistics(days = 30, startDate = null, endDate = null) {
     const stats = {
       daily: {},
       tools: {},
@@ -683,11 +736,28 @@ class CodeStatisticsRedis {
     }
 
     try {
-      const today = new Date()
+      // 构建日期列表
+      let dateList = []
+      if (startDate && endDate) {
+        // 使用自定义日期范围
+        const start = new Date(startDate)
+        const end = new Date(endDate)
 
-      for (let i = 0; i < days; i++) {
-        const date = new Date(today)
-        date.setDate(date.getDate() - i)
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          dateList.push(new Date(d))
+        }
+      } else {
+        // 使用原来的逻辑：从今天往前推 days 天
+        const today = new Date()
+        for (let i = 0; i < days; i++) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          dateList.push(date)
+        }
+      }
+
+      // 统一处理日期列表
+      for (const date of dateList) {
         const dateString = this.getDateString(date)
 
         // 获取该日期所有工具的统计
@@ -725,9 +795,10 @@ class CodeStatisticsRedis {
         }
       }
 
+      const actualDays = dateList.length
       // 计算平均值和转换Set为数量
       for (const [_toolName, toolData] of Object.entries(stats.tools)) {
-        toolData.dailyAvg = Math.round((toolData.totalCount / days) * 100) / 100
+        toolData.dailyAvg = Math.round((toolData.totalCount / actualDays) * 100) / 100
         toolData.totalUsers = toolData.totalUsers.size
       }
 
@@ -795,9 +866,9 @@ class CodeStatisticsRedis {
   /**
    * 获取最受欢迎的工具排行
    */
-  async getTopToolsRanking(limit = 10, days = 30) {
+  async getTopToolsRanking(limit = 10, days = 30, startDate = null, endDate = null) {
     try {
-      const toolStats = await this.getToolUsageStatistics(days)
+      const toolStats = await this.getToolUsageStatistics(days, startDate, endDate)
 
       const ranking = Object.entries(toolStats.tools)
         .filter(([toolName]) => toolName !== 'Unknown' && toolName !== 'undefined')
@@ -820,14 +891,32 @@ class CodeStatisticsRedis {
   /**
    * 获取活跃用户数
    */
-  async getActiveUsersCount(days = 1) {
+  async getActiveUsersCount(days = 1, startDate = null, endDate = null) {
     try {
       const activeUsers = new Set()
-      const today = new Date()
 
-      for (let i = 0; i < days; i++) {
-        const date = new Date(today)
-        date.setDate(date.getDate() - i)
+      // 构建日期列表
+      let dateList = []
+      if (startDate && endDate) {
+        // 使用自定义日期范围
+        const start = new Date(startDate)
+        const end = new Date(endDate)
+
+        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+          dateList.push(new Date(d))
+        }
+      } else {
+        // 使用原来的逻辑：从今天往前推 days 天
+        const today = new Date()
+        for (let i = 0; i < days; i++) {
+          const date = new Date(today)
+          date.setDate(date.getDate() - i)
+          dateList.push(date)
+        }
+      }
+
+      // 统一处理日期列表
+      for (const date of dateList) {
         const dateString = this.getDateString(date)
 
         // 获取该日期所有用户的统计数据
