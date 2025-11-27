@@ -62,6 +62,20 @@ const MODEL_PRICING = {
     cacheRead: 0.03
   },
 
+  // MiniMax 系列
+  'MiniMax-M2-Preview': {
+    input: 0.295775,
+    output: 1.183099,
+    cacheWrite: 1.183099,
+    cacheRead: 0.295775
+  },
+  'MiniMax-M2': {
+    input: 0.295775,
+    output: 1.183099,
+    cacheWrite: 1.183099,
+    cacheRead: 0.295775
+  },
+
   // 默认定价（用于未知模型）
   unknown: {
     input: 3.0,

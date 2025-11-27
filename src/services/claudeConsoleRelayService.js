@@ -15,6 +15,81 @@ class ClaudeConsoleRelayService {
     this.defaultUserAgent = 'claude-cli/1.0.69 (external, cli)'
   }
 
+  // 统一 UA：捕获并返回统一的 Claude Code User-Agent（按日缓存）
+  async captureAndGetUnifiedUserAgent(clientHeaders) {
+    if (!config?.claudeConsole?.useUnifiedUserAgent) {
+      return null
+    }
+
+    const CACHE_KEY = 'claude_console_user_agent:daily'
+    const TTL = 90000 // 25小时
+    const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+    const isCliUA = clientUA && /^claude-cli\/[\d.]+\s+\(/i.test(clientUA)
+
+    let cachedUA = await redis.client.get(CACHE_KEY)
+
+    if (isCliUA) {
+      if (!cachedUA) {
+        await redis.client.setex(CACHE_KEY, TTL, clientUA)
+        cachedUA = clientUA
+        logger.info(`Captured unified Console UA: ${clientUA}`)
+      } else {
+        const newVer = this._extractClaudeCliVersion(clientUA)
+        const oldVer = this._extractClaudeCliVersion(cachedUA)
+        if (!newVer || !oldVer || this._compareSemanticVersions(newVer, oldVer) > 0) {
+          await redis.client.setex(CACHE_KEY, TTL, clientUA)
+          logger.info(`Updated Console unified UA: ${clientUA} (was: ${cachedUA})`)
+          cachedUA = clientUA
+        } else {
+          await redis.client.expire(CACHE_KEY, TTL)
+        }
+      }
+    }
+
+    return cachedUA || null
+  }
+
+  _extractClaudeCliVersion(ua) {
+    if (!ua) {
+      return null
+    }
+    const m = ua.match(/claude-cli\/([\d.]+(?:[a-zA-Z0-9-]*)?)/i)
+    return m ? m[1] : null
+  }
+
+  _compareSemanticVersions(v1, v2) {
+    if (!v1 || !v2) {
+      return 0
+    }
+    const a = v1.split('.').map((x) => parseInt(x, 10) || 0)
+    const b = v2.split('.').map((x) => parseInt(x, 10) || 0)
+    const n = Math.max(a.length, b.length)
+    for (let i = 0; i < n; i++) {
+      const d = (a[i] || 0) - (b[i] || 0)
+      if (d !== 0) {
+        return d > 0 ? 1 : -1
+      }
+    }
+    return 0
+  }
+
+  async _selectUserAgent(clientHeaders, account) {
+    if (config?.claudeConsole?.useUnifiedUserAgent) {
+      const unifiedUA = await this.captureAndGetUnifiedUserAgent(clientHeaders)
+      const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+      // 按评审建议：当未捕获到统一UA时，优先使用账号UA，再退回客户端UA，避免打破Console指纹
+      const selectedUA = unifiedUA || account.userAgent || clientUA || this.defaultUserAgent
+      logger.debug(`Selected Console UA: ${selectedUA}`)
+      return selectedUA
+    }
+    return (
+      account.userAgent ||
+      clientHeaders?.['user-agent'] ||
+      clientHeaders?.['User-Agent'] ||
+      this.defaultUserAgent
+    )
+  }
+
   // 🚀 转发请求到Claude Console API
   async relayRequest(
     requestBody,
@@ -97,6 +172,24 @@ class ClaudeConsoleRelayService {
         model: mappedModel
       }
 
+      // 处理统一的客户端标识（全局开关）
+      if (
+        config.claudeConsole &&
+        config.claudeConsole.useUnifiedClientId &&
+        config.claudeConsole.unifiedClientId
+      ) {
+        const uid = modifiedRequestBody?.metadata?.user_id
+        if (uid) {
+          const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
+          if (m && m[1]) {
+            modifiedRequestBody.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+            logger.info(
+              `🔄 Replaced client ID with unified ID: ${modifiedRequestBody.metadata.user_id}`
+            )
+          }
+        }
+      }
+
       // 模型兼容性检查已经在调度器中完成，这里不需要再检查
 
       // 创建代理agent
@@ -142,13 +235,8 @@ class ClaudeConsoleRelayService {
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
       logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
 
-      // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
-      const userAgent =
-        account.userAgent ||
-        clientHeaders?.['user-agent'] ||
-        clientHeaders?.['User-Agent'] ||
-        this.defaultUserAgent
-
+      // 统一 UA：优先使用捕获 UA；否则用客户端 UA；再回退账户 UA/默认 UA
+      const userAgent = await this._selectUserAgent(clientHeaders, account)
       // 准备请求配置
       const requestConfig = {
         method: 'POST',
@@ -172,15 +260,8 @@ class ClaudeConsoleRelayService {
       }
 
       // 根据 API Key 格式选择认证方式
-      if (account.apiKey && account.apiKey.startsWith('sk-ant-')) {
-        // Anthropic 官方 API Key 使用 x-api-key
-        requestConfig.headers['x-api-key'] = account.apiKey
-        logger.debug('[DEBUG] Using x-api-key authentication for sk-ant-* API key')
-      } else {
-        // 其他 API Key 使用 Authorization Bearer
-        requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
-        logger.debug('[DEBUG] Using Authorization Bearer authentication')
-      }
+      requestConfig.headers['Authorization'] = `Bearer ${account.apiKey}`
+      logger.debug('[DEBUG] Using Authorization Bearer authentication')
 
       logger.debug(
         `[DEBUG] Initial headers before beta: ${JSON.stringify(requestConfig.headers, null, 2)}`
@@ -269,6 +350,15 @@ class ClaudeConsoleRelayService {
       } else if (response.status === 529) {
         logger.warn(`🚫 Overload error detected for Claude Console account ${accountId}`)
         await claudeConsoleAccountService.markAccountOverloaded(accountId)
+      } else if (response.status === 500) {
+        // 检查响应内容是否包含"限流"关键词
+        const responseText =
+          typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+
+        if (responseText && responseText.includes('限流')) {
+          logger.warn(`🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`)
+          await claudeConsoleAccountService.markAccountRateLimited(accountId)
+        }
       } else if (response.status === 200 || response.status === 201) {
         // 如果请求成功，检查并移除错误状态
         const isRateLimited = await claudeConsoleAccountService.isAccountRateLimited(accountId)
@@ -516,8 +606,25 @@ class ClaudeConsoleRelayService {
     streamTransformer = null,
     requestOptions = {}
   ) {
+    const userAgent = await this._selectUserAgent(clientHeaders, account)
     return new Promise((resolve, reject) => {
       let aborted = false
+
+      // 处理统一的客户端标识（全局开关，流式）
+      if (
+        config.claudeConsole &&
+        config.claudeConsole.useUnifiedClientId &&
+        config.claudeConsole.unifiedClientId
+      ) {
+        const uid = body?.metadata?.user_id
+        if (uid) {
+          const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
+          if (m && m[1]) {
+            body.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+            logger.info(`🔄 Replaced client ID with unified ID: ${body.metadata.user_id}`)
+          }
+        }
+      }
 
       // 构建完整的API URL
       const cleanUrl = account.apiUrl.replace(/\/$/, '') // 移除末尾斜杠
@@ -529,12 +636,8 @@ class ClaudeConsoleRelayService {
       const filteredHeaders = this._filterClientHeaders(clientHeaders)
       logger.debug(`[DEBUG] Filtered client headers: ${JSON.stringify(filteredHeaders)}`)
 
-      // 决定使用的 User-Agent：优先使用账户自定义的，否则透传客户端的，最后才使用默认值
-      const userAgent =
-        account.userAgent ||
-        clientHeaders?.['user-agent'] ||
-        clientHeaders?.['User-Agent'] ||
-        this.defaultUserAgent
+      // 统一 UA：优先使用捕获 UA；否则用客户端 UA；再回退账户 UA/默认 UA
+      // userAgent 已在 Promise 外部获取
 
       // 准备请求配置
       const requestConfig = {
@@ -627,6 +730,14 @@ class ClaudeConsoleRelayService {
                 })
               } else if (response.status === 529) {
                 await claudeConsoleAccountService.markAccountOverloaded(accountId)
+              } else if (response.status === 500) {
+                // 对于500错误，检查是否包含"限流"关键词
+                if (errorDataForCheck && errorDataForCheck.includes('限流')) {
+                  logger.warn(
+                    `🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`
+                  )
+                  await claudeConsoleAccountService.markAccountRateLimited(accountId)
+                }
               }
 
               // 设置响应头
@@ -694,6 +805,7 @@ class ClaudeConsoleRelayService {
           const collectedUsageData = {
             model: body.model || account?.defaultModel || null
           }
+          const collectedContent = []
 
           // 处理流数据
           response.data.on('data', (chunk) => {
@@ -760,6 +872,51 @@ class ClaudeConsoleRelayService {
                         }
                       }
 
+                      // 捕获内容块开始
+                      if (data.type === 'content_block_start' && data.content_block) {
+                        collectedContent.push({
+                          index: data.index,
+                          type: data.content_block.type,
+                          name: data.content_block.name,
+                          input: data.content_block.input || {},
+                          text: '',
+                          inputJsonBuffer: '' // 用于累积拼接JSON字符串
+                        })
+                      }
+
+                      // 捕获内容块增量
+                      if (data.type === 'content_block_delta' && data.delta) {
+                        const contentIndex = data.index
+
+                        if (collectedContent[contentIndex]) {
+                          if (data.delta.type === 'text_delta' && data.delta.text) {
+                            collectedContent[contentIndex].text += data.delta.text
+                          } else if (
+                            data.delta.type === 'input_json_delta' &&
+                            data.delta.partial_json
+                          ) {
+                            // 累积拼接JSON字符串
+                            if (!collectedContent[contentIndex].inputJsonBuffer) {
+                              collectedContent[contentIndex].inputJsonBuffer = ''
+                            }
+                            collectedContent[contentIndex].inputJsonBuffer +=
+                              data.delta.partial_json
+
+                            // 尝试解析完整JSON
+                            try {
+                              const completeInput = JSON.parse(
+                                collectedContent[contentIndex].inputJsonBuffer
+                              )
+                              collectedContent[contentIndex].input = completeInput
+                            } catch (e) {
+                              // JSON不完整，继续累积
+                            }
+                          }
+                        } else {
+                          // Content index not found - skip
+                        }
+                      }
+
                       if (data.type === 'message_delta' && data.usage) {
                         // 提取所有usage字段，message_delta可能包含完整的usage信息
                         if (data.usage.output_tokens !== undefined) {
@@ -812,7 +969,21 @@ class ClaudeConsoleRelayService {
                             '🎯 [Console] Complete usage data collected:',
                             JSON.stringify(collectedUsageData)
                           )
-                          usageCallback({ ...collectedUsageData, accountId })
+
+                          // 构建完整的响应对象传递给插件（包含收集的内容块）
+                          const callbackResponse = {
+                            content: collectedContent.map((item) => ({
+                              type: 'tool_use',
+                              name: item.name,
+                              input: item.input
+                            }))
+                          }
+
+                          usageCallback({
+                            ...collectedUsageData,
+                            accountId,
+                            response: callbackResponse
+                          })
                           finalUsageReported = true
                         }
                       }
@@ -879,10 +1050,24 @@ class ClaudeConsoleRelayService {
                   if (!collectedUsageData.model) {
                     collectedUsageData.model = body.model || account?.defaultModel || null
                   }
+
+                  // 构建完整的响应对象（包含收集的内容块）
+                  const callbackResponse = {
+                    content: collectedContent.map((item) => ({
+                      type: 'tool_use',
+                      name: item.name,
+                      input: item.input
+                    }))
+                  }
+
                   logger.info(
                     `📊 [Console] Saving incomplete usage data via fallback: ${JSON.stringify(collectedUsageData)}`
                   )
-                  usageCallback({ ...collectedUsageData, accountId })
+                  usageCallback({
+                    ...collectedUsageData,
+                    accountId,
+                    response: callbackResponse
+                  })
                   finalUsageReported = true
                 } else {
                   logger.warn(
@@ -945,6 +1130,20 @@ class ClaudeConsoleRelayService {
               })
             } else if (error.response.status === 529) {
               claudeConsoleAccountService.markAccountOverloaded(accountId)
+            } else if (error.response.status === 500) {
+              // 对于axios捕获的500错误，检查错误内容
+              const errorText = error.response.data
+                ? typeof error.response.data === 'string'
+                  ? error.response.data
+                  : JSON.stringify(error.response.data)
+                : ''
+
+              if (errorText.includes('限流')) {
+                logger.warn(
+                  `🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`
+                )
+                claudeConsoleAccountService.markAccountRateLimited(accountId)
+              }
             }
           }
 

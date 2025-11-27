@@ -38,6 +38,7 @@ const {
   requestSizeLimit
 } = require('./middleware/auth')
 const { browserFallbackMiddleware } = require('./middleware/browserFallback')
+const { claudeCliVersionCheck } = require('./middleware/claudeCliVersionCheck')
 
 class Application {
   constructor() {
@@ -85,6 +86,11 @@ class Application {
       const claudeAccountService = require('./services/claudeAccountService')
       await claudeAccountService.initializeSessionWindows()
 
+      // 🔌 插件系统初始化
+      logger.info('🔄 Initializing plugin system...')
+      const pluginLoader = require('../plugins/plugin-loader')
+      pluginLoader.init(this.app)
+
       // 超早期拦截 /admin-next/ 请求 - 在所有中间件之前
       this.app.use((req, res, next) => {
         if (req.path === '/admin-next/' && req.method === 'GET') {
@@ -120,6 +126,9 @@ class Application {
 
       // 🆕 兜底中间件：处理Chrome插件兼容性（必须在认证之前）
       this.app.use(browserFallbackMiddleware)
+
+      // 🧩 拦截低版本 Claude Code CLI（基于 UA 的版本校验）
+      this.app.use(claudeCliVersionCheck)
 
       // 📦 压缩 - 排除流式响应（SSE）
       this.app.use(

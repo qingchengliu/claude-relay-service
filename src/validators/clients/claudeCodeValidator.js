@@ -146,10 +146,10 @@ class ClaudeCodeValidator {
       }
 
       // 3. 检查系统提示词是否为 Claude Code 的系统提示词
-      if (!this.hasClaudeCodeSystemPrompt(req.body)) {
-        logger.debug('Claude Code validation failed - missing or invalid Claude Code system prompt')
-        return false
-      }
+      // if (!this.hasClaudeCodeSystemPrompt(req.body)) {
+      //   logger.debug('Claude Code validation failed - missing or invalid Claude Code system prompt')
+      //   return false
+      // }
 
       // 4. 检查必需的头部（值不为空即可）
       const xApp = req.headers['x-app']
