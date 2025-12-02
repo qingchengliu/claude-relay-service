@@ -327,6 +327,19 @@ class ClaudeConsoleRelayService {
       // 检查是否为账户禁用/不可用的 400 错误
       const accountDisabledError = isAccountDisabledError(response.status, response.data)
 
+      // 检查400状态是否包含模型不可用错误，需要转为429
+      let effectiveStatusCode = response.status
+      if (response.status === 400) {
+        const responseText =
+          typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+        if (responseText && responseText.includes('The requested model currently unavailable')) {
+          logger.warn(
+            `🚫 Model unavailable (400) detected for Claude Console account ${accountId}, treating as 429 rate limit`
+          )
+          effectiveStatusCode = 429
+        }
+      }
+
       // 检查错误状态并相应处理
       if (response.status === 401) {
         logger.warn(`🚫 Unauthorized error detected for Claude Console account ${accountId}`)
@@ -339,7 +352,7 @@ class ClaudeConsoleRelayService {
         const errorDetails =
           typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
         await claudeConsoleAccountService.markConsoleAccountBlocked(accountId, errorDetails)
-      } else if (response.status === 429) {
+      } else if (response.status === 429 || effectiveStatusCode === 429) {
         logger.warn(`🚫 Rate limit detected for Claude Console account ${accountId}`)
         // 收到429先检查是否因为超过了手动配置的每日额度
         await claudeConsoleAccountService.checkQuotaUsage(accountId).catch((err) => {
@@ -400,7 +413,7 @@ class ClaudeConsoleRelayService {
       logger.debug(`[DEBUG] Final response body to return: ${responseBody.substring(0, 200)}...`)
 
       return {
-        statusCode: response.status,
+        statusCode: effectiveStatusCode,
         headers: response.headers,
         body: responseBody,
         accountId
@@ -711,6 +724,18 @@ class ClaudeConsoleRelayService {
                 errorDataForCheck
               )
 
+              // 检查400状态是否包含模型不可用错误，需要转为429
+              let effectiveStatusCode = response.status
+              if (
+                response.status === 400 &&
+                errorDataForCheck.includes('The requested model currently unavailable')
+              ) {
+                logger.warn(
+                  `🚫 [Stream] Model unavailable (400) detected for Claude Console account ${accountId}, treating as 429 rate limit`
+                )
+                effectiveStatusCode = 429
+              }
+
               if (response.status === 401) {
                 await claudeConsoleAccountService.markAccountUnauthorized(accountId)
               } else if (accountDisabledError) {
@@ -722,7 +747,7 @@ class ClaudeConsoleRelayService {
                   accountId,
                   errorDataForCheck
                 )
-              } else if (response.status === 429) {
+              } else if (response.status === 429 || effectiveStatusCode === 429) {
                 await claudeConsoleAccountService.markAccountRateLimited(accountId)
                 // 检查是否因为超过每日额度
                 claudeConsoleAccountService.checkQuotaUsage(accountId).catch((err) => {
@@ -740,9 +765,9 @@ class ClaudeConsoleRelayService {
                 }
               }
 
-              // 设置响应头
+              // 设置响应头（使用 effectiveStatusCode）
               if (!responseStream.headersSent) {
-                responseStream.writeHead(response.status, {
+                responseStream.writeHead(effectiveStatusCode, {
                   'Content-Type': 'application/json',
                   'Cache-Control': 'no-cache'
                 })
