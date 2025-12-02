@@ -327,14 +327,19 @@ class ClaudeConsoleRelayService {
       // 检查是否为账户禁用/不可用的 400 错误
       const accountDisabledError = isAccountDisabledError(response.status, response.data)
 
-      // 检查400状态是否包含模型不可用错误，需要转为429
+      // 检查400/500状态是否包含需要转为429的错误关键词
       let effectiveStatusCode = response.status
-      if (response.status === 400) {
+      if (response.status === 400 || response.status === 500) {
         const responseText =
           typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
-        if (responseText && responseText.includes('The requested model currently unavailable')) {
+        // 需要转为429的错误关键词列表
+        const rateLimitKeywords = ['currently unavailable', 'anthropic服务失败', '负载过高', '限流']
+        const matchedKeyword = rateLimitKeywords.find(
+          (kw) => responseText && responseText.includes(kw)
+        )
+        if (matchedKeyword) {
           logger.warn(
-            `🚫 Model unavailable (400) detected for Claude Console account ${accountId}, treating as 429 rate limit`
+            `🚫 Rate limit keyword detected (${response.status}) for Claude Console account ${accountId}: "${matchedKeyword}", treating as 429`
           )
           effectiveStatusCode = 429
         }
@@ -363,15 +368,6 @@ class ClaudeConsoleRelayService {
       } else if (response.status === 529) {
         logger.warn(`🚫 Overload error detected for Claude Console account ${accountId}`)
         await claudeConsoleAccountService.markAccountOverloaded(accountId)
-      } else if (response.status === 500) {
-        // 检查响应内容是否包含"限流"关键词
-        const responseText =
-          typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
-
-        if (responseText && responseText.includes('限流')) {
-          logger.warn(`🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`)
-          await claudeConsoleAccountService.markAccountRateLimited(accountId)
-        }
       } else if (response.status === 200 || response.status === 201) {
         // 如果请求成功，检查并移除错误状态
         const isRateLimited = await claudeConsoleAccountService.isAccountRateLimited(accountId)
@@ -724,16 +720,25 @@ class ClaudeConsoleRelayService {
                 errorDataForCheck
               )
 
-              // 检查400状态是否包含模型不可用错误，需要转为429
+              // 检查400/500状态是否包含需要转为429的错误关键词
               let effectiveStatusCode = response.status
-              if (
-                response.status === 400 &&
-                errorDataForCheck.includes('The requested model currently unavailable')
-              ) {
-                logger.warn(
-                  `🚫 [Stream] Model unavailable (400) detected for Claude Console account ${accountId}, treating as 429 rate limit`
+              if (response.status === 400 || response.status === 500) {
+                // 需要转为429的错误关键词列表
+                const rateLimitKeywords = [
+                  'currently unavailable',
+                  'anthropic服务失败',
+                  '负载过高',
+                  '限流'
+                ]
+                const matchedKeyword = rateLimitKeywords.find(
+                  (kw) => errorDataForCheck && errorDataForCheck.includes(kw)
                 )
-                effectiveStatusCode = 429
+                if (matchedKeyword) {
+                  logger.warn(
+                    `🚫 [Stream] Rate limit keyword detected (${response.status}) for Claude Console account ${accountId}: "${matchedKeyword}", treating as 429`
+                  )
+                  effectiveStatusCode = 429
+                }
               }
 
               if (response.status === 401) {
@@ -755,14 +760,6 @@ class ClaudeConsoleRelayService {
                 })
               } else if (response.status === 529) {
                 await claudeConsoleAccountService.markAccountOverloaded(accountId)
-              } else if (response.status === 500) {
-                // 对于500错误，检查是否包含"限流"关键词
-                if (errorDataForCheck && errorDataForCheck.includes('限流')) {
-                  logger.warn(
-                    `🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`
-                  )
-                  await claudeConsoleAccountService.markAccountRateLimited(accountId)
-                }
               }
 
               // 设置响应头（使用 effectiveStatusCode）
