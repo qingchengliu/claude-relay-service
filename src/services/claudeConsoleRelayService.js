@@ -13,6 +13,14 @@ const {
 class ClaudeConsoleRelayService {
   constructor() {
     this.defaultUserAgent = 'claude-cli/1.0.69 (external, cli)'
+    // 统一的限流关键词列表
+    this.rateLimitKeywords = [
+      'currently unavailable',
+      'anthropic服务失败',
+      '负载过高',
+      '限流',
+      '没有可用token'
+    ]
   }
 
   // 统一 UA：捕获并返回统一的 Claude Code User-Agent（按日缓存）
@@ -332,9 +340,8 @@ class ClaudeConsoleRelayService {
       if (response.status === 400 || response.status === 500) {
         const responseText =
           typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
-        // 需要转为429的错误关键词列表
-        const rateLimitKeywords = ['currently unavailable', 'anthropic服务失败', '负载过高', '限流']
-        const matchedKeyword = rateLimitKeywords.find(
+        // 使用统一的限流关键词列表
+        const matchedKeyword = this.rateLimitKeywords.find(
           (kw) => responseText && responseText.includes(kw)
         )
         if (matchedKeyword) {
@@ -343,6 +350,7 @@ class ClaudeConsoleRelayService {
           )
           effectiveStatusCode = 429
         }
+        
       }
 
       // 检查错误状态并相应处理
@@ -723,14 +731,8 @@ class ClaudeConsoleRelayService {
               // 检查400/500状态是否包含需要转为429的错误关键词
               let effectiveStatusCode = response.status
               if (response.status === 400 || response.status === 500) {
-                // 需要转为429的错误关键词列表
-                const rateLimitKeywords = [
-                  'currently unavailable',
-                  'anthropic服务失败',
-                  '负载过高',
-                  '限流'
-                ]
-                const matchedKeyword = rateLimitKeywords.find(
+                // 使用统一的限流关键词列表
+                const matchedKeyword = this.rateLimitKeywords.find(
                   (kw) => errorDataForCheck && errorDataForCheck.includes(kw)
                 )
                 if (matchedKeyword) {
@@ -1160,9 +1162,13 @@ class ClaudeConsoleRelayService {
                   : JSON.stringify(error.response.data)
                 : ''
 
-              if (errorText.includes('限流')) {
+              // 检查是否包含限流关键词
+              const matchedKeyword = this.rateLimitKeywords.find(
+                (kw) => errorText && errorText.includes(kw)
+              )
+              if (matchedKeyword) {
                 logger.warn(
-                  `🚫 Rate limit detected in 500 error for Claude Console account ${accountId}`
+                  `🚫 Rate limit keyword detected in 500 error for Claude Console account ${accountId}: "${matchedKeyword}"`
                 )
                 claudeConsoleAccountService.markAccountRateLimited(accountId)
               }
