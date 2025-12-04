@@ -15,11 +15,12 @@ class ClaudeConsoleRelayService {
     this.defaultUserAgent = 'claude-cli/2.0.52 (external, cli)'
     // 统一的限流关键词列表
     this.rateLimitKeywords = [
-      'currently unavailable',
-      'anthropic服务失败',
+      'unavailable',
+      '服务失败',
       '负载过高',
       '限流',
-      '没有可用token'
+      '没有可用',
+      'Forbidden'
     ]
   }
 
@@ -337,7 +338,7 @@ class ClaudeConsoleRelayService {
 
       // 检查400/500状态是否包含需要转为429的错误关键词
       let effectiveStatusCode = response.status
-      if (response.status === 400 || response.status === 500) {
+      if (response.status === 400 || response.status === 500 || response.status === 403) {
         const responseText =
           typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
         // 使用统一的限流关键词列表
@@ -350,7 +351,6 @@ class ClaudeConsoleRelayService {
           )
           effectiveStatusCode = 429
         }
-        
       }
 
       // 检查错误状态并相应处理
@@ -730,7 +730,7 @@ class ClaudeConsoleRelayService {
 
               // 检查400/500状态是否包含需要转为429的错误关键词
               let effectiveStatusCode = response.status
-              if (response.status === 400 || response.status === 500) {
+              if (response.status === 400 || response.status === 500 || response.status === 403) {
                 // 使用统一的限流关键词列表
                 const matchedKeyword = this.rateLimitKeywords.find(
                   (kw) => errorDataForCheck && errorDataForCheck.includes(kw)
