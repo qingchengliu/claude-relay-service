@@ -104,18 +104,18 @@ async function handleMessagesRequest(req, res) {
     const isStream = req.body.stream === true
 
     // 临时修复新版本客户端，删除context_management字段，避免报错
-    if (req.body.context_management) {
-      delete req.body.context_management
-    }
+    // if (req.body.context_management) {
+    //   delete req.body.context_management
+    // }
 
     // 遍历tools数组，删除input_examples字段
-    if (req.body.tools && Array.isArray(req.body.tools)) {
-      req.body.tools.forEach((tool) => {
-        if (tool && typeof tool === 'object' && tool.input_examples) {
-          delete tool.input_examples
-        }
-      })
-    }
+    // if (req.body.tools && Array.isArray(req.body.tools)) {
+    //   req.body.tools.forEach((tool) => {
+    //     if (tool && typeof tool === 'object' && tool.input_examples) {
+    //       delete tool.input_examples
+    //     }
+    //   })
+    // }
 
     logger.api(
       `🚀 Processing ${isStream ? 'stream' : 'non-stream'} request for key: ${req.apiKey.name}`
@@ -1006,6 +1006,9 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
   const maxAttempts = 2
   let attempt = 0
 
+  // 引入 claudeConsoleAccountService 用于检查 count_tokens 可用性
+  const claudeConsoleAccountService = require('../services/claudeConsoleAccountService')
+
   const processRequest = async () => {
     const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
       req.apiKey,
@@ -1037,6 +1040,17 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
       })
     }
 
+    // 🔍 claude-console 账户特殊处理：检查 count_tokens 端点是否可用
+    if (accountType === 'claude-console') {
+      const isUnavailable = await claudeConsoleAccountService.isCountTokensUnavailable(accountId)
+      if (isUnavailable) {
+        logger.info(
+          `⏭️ count_tokens unavailable for Claude Console account ${accountId}, returning fallback response`
+        )
+        return { fallbackResponse: true }
+      }
+    }
+
     const relayOptions = {
       skipUsageRecord: true,
       customPath: '/v1/messages/count_tokens'
@@ -1062,6 +1076,23 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
             relayOptions
           )
 
+    // 🔍 claude-console 账户：检测上游 404 响应并标记
+    if (accountType === 'claude-console' && response.statusCode === 404) {
+      logger.warn(
+        `⚠️ count_tokens endpoint returned 404 for Claude Console account ${accountId}, marking as unavailable`
+      )
+      // 标记失败不应影响 fallback 响应
+      try {
+        await claudeConsoleAccountService.markCountTokensUnavailable(accountId)
+      } catch (markError) {
+        logger.error(
+          `❌ Failed to mark count_tokens unavailable for account ${accountId}, but will still return fallback:`,
+          markError
+        )
+      }
+      return { fallbackResponse: true }
+    }
+
     res.status(response.statusCode)
 
     const skipHeaders = ['content-encoding', 'transfer-encoding', 'content-length']
@@ -1084,11 +1115,21 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
     }
 
     logger.info(`✅ Token count request completed for key: ${req.apiKey.name}`)
+    return { fallbackResponse: false }
   }
 
   while (attempt < maxAttempts) {
     try {
-      await processRequest()
+      const result = await processRequest()
+
+      // 🔍 处理 fallback 响应（claude-console 账户 count_tokens 不可用）
+      if (result && result.fallbackResponse) {
+        if (!res.headersSent) {
+          return res.status(200).json({ input_tokens: 0 })
+        }
+        return
+      }
+
       return
     } catch (error) {
       if (error.code === 'CONSOLE_ACCOUNT_CONCURRENCY_FULL') {

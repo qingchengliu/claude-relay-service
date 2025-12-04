@@ -5,6 +5,7 @@ const apiKeyService = require('../services/apiKeyService')
 const CostCalculator = require('../utils/costCalculator')
 const claudeAccountService = require('../services/claudeAccountService')
 const openaiAccountService = require('../services/openaiAccountService')
+const { createClaudeTestPayload } = require('../utils/testPayloadHelper')
 
 const router = express.Router()
 
@@ -808,6 +809,66 @@ router.post('/api/batch-model-stats', async (req, res) => {
       error: 'Internal server error',
       message: 'Failed to retrieve batch model statistics'
     })
+  }
+})
+
+// 🧪 API Key 端点测试接口 - 测试API Key是否能正常访问服务
+router.post('/api-key/test', async (req, res) => {
+  const config = require('../../config/config')
+  const { sendStreamTestRequest } = require('../utils/testPayloadHelper')
+
+  try {
+    const { apiKey, model = 'claude-sonnet-4-5-20250929' } = req.body
+
+    if (!apiKey) {
+      return res.status(400).json({
+        error: 'API Key is required',
+        message: 'Please provide your API Key'
+      })
+    }
+
+    if (typeof apiKey !== 'string' || apiKey.length < 10 || apiKey.length > 512) {
+      return res.status(400).json({
+        error: 'Invalid API key format',
+        message: 'API key format is invalid'
+      })
+    }
+
+    const validation = await apiKeyService.validateApiKeyForStats(apiKey)
+    if (!validation.valid) {
+      return res.status(401).json({
+        error: 'Invalid API key',
+        message: validation.error
+      })
+    }
+
+    logger.api(`🧪 API Key test started for: ${validation.keyData.name} (${validation.keyData.id})`)
+
+    const port = config.server.port || 3000
+    const apiUrl = `http://127.0.0.1:${port}/api/v1/messages?beta=true`
+
+    await sendStreamTestRequest({
+      apiUrl,
+      authorization: apiKey,
+      responseStream: res,
+      payload: createClaudeTestPayload(model, { stream: true }),
+      timeout: 60000,
+      extraHeaders: { 'x-api-key': apiKey }
+    })
+  } catch (error) {
+    logger.error('❌ API Key test failed:', error)
+
+    if (!res.headersSent) {
+      return res.status(500).json({
+        error: 'Test failed',
+        message: error.message || 'Internal server error'
+      })
+    }
+
+    res.write(
+      `data: ${JSON.stringify({ type: 'error', error: error.message || 'Test failed' })}\n\n`
+    )
+    res.end()
   }
 })
 
