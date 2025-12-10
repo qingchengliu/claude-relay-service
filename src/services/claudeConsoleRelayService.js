@@ -25,6 +25,40 @@ class ClaudeConsoleRelayService {
     ]
   }
 
+  /**
+   * 检查并递增限流关键词匹配计数，返回是否应该触发限流
+   * @param {string} accountId - 账户ID
+   * @param {string} matchedKeyword - 匹配到的关键词
+   * @returns {Promise<{shouldTrigger: boolean, count: number}>} - 是否触发限流及当前计数
+   */
+  async checkRateLimitKeywordCount(accountId, matchedKeyword) {
+    const threshold = config.claudeConsole?.rateLimitKeywordThreshold || 5
+    const windowSeconds = config.claudeConsole?.rateLimitKeywordWindow || 60
+    const redisKey = `rate_limit_keyword:${accountId}`
+
+    try {
+      // 使用 INCR 原子递增计数
+      const count = await redis.client.incr(redisKey)
+
+      // 如果是第一次计数，设置过期时间
+      if (count === 1) {
+        await redis.client.expire(redisKey, windowSeconds)
+      }
+
+      const shouldTrigger = count >= threshold
+
+      logger.debug(
+        `📊 Rate limit keyword count for account ${accountId}: ${count}/${threshold} (keyword: "${matchedKeyword}", window: ${windowSeconds}s)`
+      )
+
+      return { shouldTrigger, count }
+    } catch (error) {
+      logger.error(`❌ Failed to check rate limit keyword count for account ${accountId}:`, error)
+      // 出错时降级为立即触发（保守策略）
+      return { shouldTrigger: true, count: -1 }
+    }
+  }
+
   // 统一 UA：捕获并返回统一的 Claude Code User-Agent（按日缓存）
   async captureAndGetUnifiedUserAgent(clientHeaders) {
     if (!config?.claudeConsole?.useUnifiedUserAgent) {
@@ -337,7 +371,7 @@ class ClaudeConsoleRelayService {
       // 检查是否为账户禁用/不可用的 400 错误
       const accountDisabledError = isAccountDisabledError(response.status, response.data)
 
-      // 检查400/500状态是否包含需要转为429的错误关键词
+      // 检查400/500状态是否包含需要转为429的错误关键词（累计检测模式）
       let effectiveStatusCode = response.status
       if (response.status === 400 || response.status === 500 || response.status === 403) {
         const responseText =
@@ -347,10 +381,22 @@ class ClaudeConsoleRelayService {
           (kw) => responseText && responseText.includes(kw)
         )
         if (matchedKeyword) {
-          logger.warn(
-            `🚫 Rate limit keyword detected (${response.status}) for Claude Console account ${accountId}: "${matchedKeyword}", treating as 429`
+          // 累计计数检测：只有达到阈值才触发限流
+          const { shouldTrigger, count } = await this.checkRateLimitKeywordCount(
+            accountId,
+            matchedKeyword
           )
-          effectiveStatusCode = 429
+          const threshold = config.claudeConsole?.rateLimitKeywordThreshold || 5
+          if (shouldTrigger) {
+            logger.warn(
+              `🚫 Rate limit keyword threshold reached (${response.status}) for Claude Console account ${accountId}: "${matchedKeyword}" (${count}/${threshold}), treating as 429`
+            )
+            effectiveStatusCode = 429
+          } else {
+            logger.info(
+              `⚠️ Rate limit keyword detected (${response.status}) for Claude Console account ${accountId}: "${matchedKeyword}" (${count}/${threshold}), not yet triggering`
+            )
+          }
         }
       }
 
