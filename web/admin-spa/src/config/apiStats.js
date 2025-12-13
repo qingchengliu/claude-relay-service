@@ -60,11 +60,11 @@ class ApiStatsClient {
     })
   }
 
-  // 申请额度增加
-  async requestQuotaIncrease(apiKey) {
+  // 申请额度增加（支持 apiKey 或 apiId）
+  async requestQuotaIncrease({ apiKey, apiId }) {
     return this.request('/apiStats/api/request-quota-increase', {
       method: 'POST',
-      body: JSON.stringify({ apiKey })
+      body: JSON.stringify(apiId ? { apiId } : { apiKey })
     })
   }
 

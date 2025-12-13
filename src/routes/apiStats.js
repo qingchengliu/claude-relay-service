@@ -1055,41 +1055,73 @@ router.post('/api/request-quota-increase', async (req, res) => {
   const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
 
   try {
-    const { apiKey } = req.body || {}
+    const { apiKey, apiId } = req.body || {}
 
-    if (
-      !apiKey ||
-      typeof apiKey !== 'string' ||
-      apiKey.length < 10 ||
-      apiKey.length > 512 ||
-      !apiKey.startsWith(config.security.apiKeyPrefix)
-    ) {
-      logger.security(`🔒 Quota increase blocked: invalid API key format from ${clientIP}`)
+    let keyData = null
+
+    // 支持两种方式：apiKey 或 apiId
+    if (apiId) {
+      // 通过 apiId 直接查询
+      if (typeof apiId !== 'string' || apiId.length < 10 || apiId.length > 100) {
+        logger.security(`🔒 Quota increase blocked: invalid apiId format from ${clientIP}`)
+        return res.status(400).json({
+          success: false,
+          error: 'invalid_format',
+          message: 'API ID格式无效'
+        })
+      }
+
+      keyData = await redis.getApiKey(apiId)
+      if (!keyData) {
+        logger.security(`🔒 Quota increase blocked: apiId not found ${apiId} from ${clientIP}`)
+        return res.status(404).json({
+          success: false,
+          error: 'not_found',
+          message: 'API Key不存在'
+        })
+      }
+    } else if (apiKey) {
+      // 通过 apiKey 验证
+      if (
+        typeof apiKey !== 'string' ||
+        apiKey.length < 10 ||
+        apiKey.length > 512 ||
+        !apiKey.startsWith(config.security.apiKeyPrefix)
+      ) {
+        logger.security(`🔒 Quota increase blocked: invalid API key format from ${clientIP}`)
+        return res.status(400).json({
+          success: false,
+          error: 'invalid_format',
+          message: 'API Key格式无效'
+        })
+      }
+
+      const validation = await apiKeyService.validateApiKeyForStats(apiKey)
+
+      if (!validation.valid) {
+        logger.security(
+          `🔒 Quota increase blocked: invalid API key (${validation.error}) from ${clientIP}`
+        )
+        return res.status(401).json({
+          success: false,
+          error: 'invalid_api_key',
+          message: validation.error || 'API Key无效或不存在'
+        })
+      }
+
+      keyData = validation.keyData
+    } else {
       return res.status(400).json({
         success: false,
-        error: 'invalid_format',
-        message: 'API Key格式无效'
+        error: 'missing_param',
+        message: '请提供 apiKey 或 apiId'
       })
     }
 
-    const validation = await apiKeyService.validateApiKeyForStats(apiKey)
-
-    if (!validation.valid) {
-      logger.security(
-        `🔒 Quota increase blocked: invalid API key (${validation.error}) from ${clientIP}`
-      )
-      return res.status(401).json({
-        success: false,
-        error: 'invalid_api_key',
-        message: validation.error || 'API Key无效或不存在'
-      })
-    }
-
-    const { keyData } = validation
     const client = redis.getClientSafe()
 
     // 用户管理开启时校验归属
-    const fullKeyData = await redis.getApiKey(keyData.id)
+    const fullKeyData = apiId ? keyData : await redis.getApiKey(keyData.id)
     const userManagementEnabled = config.userManagement?.enabled === true
     if (
       userManagementEnabled &&

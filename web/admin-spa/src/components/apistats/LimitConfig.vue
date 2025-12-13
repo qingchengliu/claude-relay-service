@@ -343,7 +343,7 @@ import { useApiStatsStore } from '@/stores/apistats'
 import WindowCountdown from '@/components/apikeys/WindowCountdown.vue'
 
 const apiStatsStore = useApiStatsStore()
-const { statsData, multiKeyMode, aggregatedStats, invalidKeys, quotaRequestLoading } =
+const { statsData, multiKeyMode, aggregatedStats, invalidKeys, quotaRequestLoading, apiId } =
   storeToRefs(apiStatsStore)
 
 const hasModelRestrictions = computed(() => {
@@ -369,6 +369,7 @@ const hasClientRestrictions = computed(() => {
 const canRequestQuota = computed(() => {
   if (!statsData.value?.limits) return false
   if (multiKeyMode.value) return false
+  if (!apiId.value) return false // 必须有 apiId（从 URL 参数获取）
 
   const { currentDailyCost, dailyCostLimit } = statsData.value.limits
   if (!dailyCostLimit || dailyCostLimit <= 0) return false
@@ -384,26 +385,21 @@ const handleRequestQuota = async () => {
   const newLimit = Math.min(currentLimit + 50, 200)
   const willReachCap = newLimit >= 200
 
-  const apiKeyInput = prompt(
-    '请输入完整的 API Key 进行验证：\n\n' +
-      `申请成功后，当日费用限额将从 $${currentLimit.toFixed(2)} 增加到 $${newLimit.toFixed(2)}` +
+  // 使用确认对话框而不是输入 API Key
+  const confirmed = confirm(
+    `确认申请增加额度？\n\n` +
+      `当日费用限额将从 $${currentLimit.toFixed(2)} 增加到 $${newLimit.toFixed(2)}` +
       (willReachCap ? '（达到上限）' : '') +
-      '\n限额将在次日 00:00 自动重置为原值'
+      `\n限额将在次日 00:00 自动重置为原值`
   )
 
-  if (!apiKeyInput || !apiKeyInput.trim()) {
-    return
-  }
-
-  const trimmedKey = apiKeyInput.trim()
-
-  if (trimmedKey.length < 10 || trimmedKey.length > 512) {
-    alert('API Key 格式无效')
+  if (!confirmed) {
     return
   }
 
   try {
-    const result = await apiStatsStore.requestQuotaIncrease(trimmedKey)
+    // 使用 store 中的 apiId
+    const result = await apiStatsStore.requestQuotaIncrease({})
     if (result.success) {
       alert(
         `✅ 额度申请成功！\n\n` +

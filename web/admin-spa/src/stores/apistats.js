@@ -150,13 +150,21 @@ export const useApiStatsStore = defineStore('apistats', () => {
     }
   }
 
-  // 申请额度增加
-  async function requestQuotaIncrease(fullApiKey) {
+  // 申请额度增加（支持 apiKey 或 apiId）
+  async function requestQuotaIncrease({ apiKey, apiId: paramApiId }) {
     quotaRequestLoading.value = true
     try {
-      const result = await apiStatsClient.requestQuotaIncrease(fullApiKey)
+      const targetApiId = paramApiId || apiId.value
+      const result = await apiStatsClient.requestQuotaIncrease(
+        apiKey ? { apiKey } : { apiId: targetApiId }
+      )
       if (result.success) {
-        await queryStats()
+        // 使用当前的 apiId 重新加载数据
+        if (targetApiId) {
+          await loadStatsWithApiId()
+        } else {
+          await queryStats()
+        }
         return result
       } else {
         throw new Error(result.message || '额度申请失败')
