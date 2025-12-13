@@ -9,6 +9,7 @@ export const useApiStatsStore = defineStore('apistats', () => {
   const loading = ref(false)
   const modelStatsLoading = ref(false)
   const oemLoading = ref(true)
+  const quotaRequestLoading = ref(false)
   const error = ref('')
   const statsPeriod = ref('daily')
   const statsData = ref(null)
@@ -146,6 +147,25 @@ export const useApiStatsStore = defineStore('apistats', () => {
       apiId.value = null
     } finally {
       loading.value = false
+    }
+  }
+
+  // 申请额度增加
+  async function requestQuotaIncrease(fullApiKey) {
+    quotaRequestLoading.value = true
+    try {
+      const result = await apiStatsClient.requestQuotaIncrease(fullApiKey)
+      if (result.success) {
+        await queryStats()
+        return result
+      } else {
+        throw new Error(result.message || '额度申请失败')
+      }
+    } catch (err) {
+      console.error('Request quota increase error:', err)
+      throw err
+    } finally {
+      quotaRequestLoading.value = false
     }
   }
 
@@ -492,6 +512,7 @@ export const useApiStatsStore = defineStore('apistats', () => {
     loading,
     modelStatsLoading,
     oemLoading,
+    quotaRequestLoading,
     error,
     statsPeriod,
     statsData,
@@ -521,6 +542,7 @@ export const useApiStatsStore = defineStore('apistats', () => {
     switchPeriod,
     loadStatsWithApiId,
     loadOemSettings,
+    requestQuotaIncrease,
     clearData,
     clearInput,
     reset

@@ -579,6 +579,10 @@ class Application {
       `🚨 Rate limit cleanup service started (checking every ${cleanupIntervalMinutes} minutes)`
     )
 
+    const quotaResetService = require('./services/quotaResetService')
+    quotaResetService.start()
+    logger.info('🔄 Quota reset service started (runs daily at 00:00)')
+
     // 🔢 启动并发计数自动清理任务（Phase 1 修复：解决并发泄漏问题）
     // 每分钟主动清理所有过期的并发项，不依赖请求触发
     setInterval(async () => {
@@ -668,6 +672,15 @@ class Application {
             logger.info('🚨 Rate limit cleanup service stopped')
           } catch (error) {
             logger.error('❌ Error stopping rate limit cleanup service:', error)
+          }
+
+          // 停止额度重置服务
+          try {
+            const quotaResetService = require('./services/quotaResetService')
+            quotaResetService.stop()
+            logger.info('🛑 Quota reset service stopped')
+          } catch (error) {
+            logger.error('❌ Error stopping quota reset service:', error)
           }
 
           // 停止费用排序索引服务

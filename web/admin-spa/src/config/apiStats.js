@@ -60,6 +60,14 @@ class ApiStatsClient {
     })
   }
 
+  // 申请额度增加
+  async requestQuotaIncrease(apiKey) {
+    return this.request('/apiStats/api/request-quota-increase', {
+      method: 'POST',
+      body: JSON.stringify({ apiKey })
+    })
+  }
+
   // 获取 OEM 设置（用于网站名称和图标）
   async getOemSettings() {
     try {

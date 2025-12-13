@@ -135,6 +135,22 @@
           </div>
         </div>
 
+        <!-- 额度申请按钮 - 仅在满足条件时显示 -->
+        <div v-if="canRequestQuota" class="mt-3">
+          <button
+            class="w-full rounded-lg bg-gradient-to-r from-blue-500 to-indigo-600 px-4 py-2 text-sm font-medium text-white shadow-md transition-all duration-200 hover:from-blue-600 hover:to-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            :disabled="quotaRequestLoading"
+            @click="handleRequestQuota"
+          >
+            <i class="fas fa-plus-circle mr-2" />
+            {{ quotaRequestLoading ? '申请中...' : '申请增加额度 (+$50)' }}
+          </button>
+          <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+            <i class="fas fa-info-circle mr-1" />
+            已用费用达95%且限额≤$200时可申请，次日00:00自动重置
+          </p>
+        </div>
+
         <!-- 总费用限制 -->
         <div>
           <div class="mb-2 flex items-center justify-between">
@@ -327,7 +343,8 @@ import { useApiStatsStore } from '@/stores/apistats'
 import WindowCountdown from '@/components/apikeys/WindowCountdown.vue'
 
 const apiStatsStore = useApiStatsStore()
-const { statsData, multiKeyMode, aggregatedStats, invalidKeys } = storeToRefs(apiStatsStore)
+const { statsData, multiKeyMode, aggregatedStats, invalidKeys, quotaRequestLoading } =
+  storeToRefs(apiStatsStore)
 
 const hasModelRestrictions = computed(() => {
   const restriction = statsData.value?.restrictions
@@ -348,6 +365,57 @@ const hasClientRestrictions = computed(() => {
     restriction.allowedClients.length > 0
   )
 })
+
+const canRequestQuota = computed(() => {
+  if (!statsData.value?.limits) return false
+  if (multiKeyMode.value) return false
+
+  const { currentDailyCost, dailyCostLimit } = statsData.value.limits
+  if (!dailyCostLimit || dailyCostLimit <= 0) return false
+
+  const usagePercentage = (currentDailyCost / dailyCostLimit) * 100
+
+  // 使用率 >= 95% 且 限额 < 200（达到200上限后不显示按钮）
+  return usagePercentage >= 95 && dailyCostLimit < 200
+})
+
+const handleRequestQuota = async () => {
+  const currentLimit = statsData.value?.limits?.dailyCostLimit || 0
+  const newLimit = Math.min(currentLimit + 50, 200)
+  const willReachCap = newLimit >= 200
+
+  const apiKeyInput = prompt(
+    '请输入完整的 API Key 进行验证：\n\n' +
+      `申请成功后，当日费用限额将从 $${currentLimit.toFixed(2)} 增加到 $${newLimit.toFixed(2)}` +
+      (willReachCap ? '（达到上限）' : '') +
+      '\n限额将在次日 00:00 自动重置为原值'
+  )
+
+  if (!apiKeyInput || !apiKeyInput.trim()) {
+    return
+  }
+
+  const trimmedKey = apiKeyInput.trim()
+
+  if (trimmedKey.length < 10 || trimmedKey.length > 512) {
+    alert('API Key 格式无效')
+    return
+  }
+
+  try {
+    const result = await apiStatsStore.requestQuotaIncrease(trimmedKey)
+    if (result.success) {
+      alert(
+        `✅ 额度申请成功！\n\n` +
+          `原限额: $${result.data.previousLimit}\n` +
+          `新限额: $${result.data.newLimit}\n` +
+          `增加金额: $${result.data.increasedAmount}`
+      )
+    }
+  } catch (err) {
+    alert(`❌ 申请失败：${err.message || '未知错误'}`)
+  }
+}
 
 // 获取每日费用进度
 const getDailyCostProgress = () => {

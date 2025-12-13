@@ -6,6 +6,7 @@ const CostCalculator = require('../utils/costCalculator')
 const claudeAccountService = require('../services/claudeAccountService')
 const openaiAccountService = require('../services/openaiAccountService')
 const { createClaudeTestPayload } = require('../utils/testPayloadHelper')
+const config = require('../../config/config')
 
 const router = express.Router()
 
@@ -1045,6 +1046,189 @@ router.post('/api/user-model-stats', async (req, res) => {
     return res.status(500).json({
       error: 'Internal server error',
       message: 'Failed to retrieve model statistics'
+    })
+  }
+})
+
+// 💰 额度申请接口 - 增加当日费用限额
+router.post('/api/request-quota-increase', async (req, res) => {
+  const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
+
+  try {
+    const { apiKey } = req.body || {}
+
+    if (
+      !apiKey ||
+      typeof apiKey !== 'string' ||
+      apiKey.length < 10 ||
+      apiKey.length > 512 ||
+      !apiKey.startsWith(config.security.apiKeyPrefix)
+    ) {
+      logger.security(`🔒 Quota increase blocked: invalid API key format from ${clientIP}`)
+      return res.status(400).json({
+        success: false,
+        error: 'invalid_format',
+        message: 'API Key格式无效'
+      })
+    }
+
+    const validation = await apiKeyService.validateApiKeyForStats(apiKey)
+
+    if (!validation.valid) {
+      logger.security(
+        `🔒 Quota increase blocked: invalid API key (${validation.error}) from ${clientIP}`
+      )
+      return res.status(401).json({
+        success: false,
+        error: 'invalid_api_key',
+        message: validation.error || 'API Key无效或不存在'
+      })
+    }
+
+    const { keyData } = validation
+    const client = redis.getClientSafe()
+
+    // 用户管理开启时校验归属
+    const fullKeyData = await redis.getApiKey(keyData.id)
+    const userManagementEnabled = config.userManagement?.enabled === true
+    if (
+      userManagementEnabled &&
+      fullKeyData?.userId &&
+      !req.admin &&
+      (!req.user || fullKeyData.userId !== req.user.id)
+    ) {
+      logger.security(
+        `🔒 Quota increase blocked: unauthorized key access ${keyData.id} by ${
+          req.user?.id || 'unknown-user'
+        } from ${clientIP}`
+      )
+      return res.status(403).json({
+        success: false,
+        error: 'unauthorized_key',
+        message: '无权操作此API Key'
+      })
+    }
+
+    const dailyCostLimit = Number(keyData.dailyCostLimit) || 0
+    const currentDailyCost =
+      Number.isFinite(Number(keyData.dailyCost)) && keyData.dailyCost !== undefined
+        ? Number(keyData.dailyCost)
+        : (await redis.getDailyCost(keyData.id)) || 0
+
+    if (dailyCostLimit >= 200) {
+      logger.security(
+        `🔒 Quota increase blocked: limit already at max 200 for key ${keyData.id} from ${clientIP}`
+      )
+      return res.status(400).json({
+        success: false,
+        error: 'limit_reached',
+        message: '当日限额已达上限200，无法继续申请'
+      })
+    }
+
+    const usagePercentage = dailyCostLimit > 0 ? (currentDailyCost / dailyCostLimit) * 100 : 0
+
+    if (usagePercentage < 95) {
+      logger.security(
+        `🔒 Quota increase blocked: usage ${usagePercentage.toFixed(2)}% for key ${
+          keyData.id
+        } from ${clientIP}`
+      )
+      return res.status(400).json({
+        success: false,
+        error: 'quota_not_reached',
+        message: '当日已用费用未达95%，无法申请'
+      })
+    }
+
+    const today = redis.getDateStringInTimezone()
+    const dailySetKey = `quota_request:daily:${today}`
+    const originalLimitKey = `quota_request:original:${keyData.id}`
+
+    // 计算次日00:05的过期时间戳（秒）
+    const timezoneOffset = config.system?.timezoneOffset ?? 0
+    const offsetMs = timezoneOffset * 60 * 60 * 1000
+    const tzNow = redis.getDateInTimezone()
+    const expireDate = new Date(tzNow)
+    expireDate.setUTCHours(0, 5, 0, 0)
+    expireDate.setUTCDate(expireDate.getUTCDate() + 1)
+    const expireAtSeconds = Math.floor((expireDate.getTime() - offsetMs) / 1000)
+
+    const previousLimit = dailyCostLimit
+
+    // 检查是否有未重置的原始限额记录（防止覆盖真正的原始值）
+    const existingOriginalLimit = await client.get(originalLimitKey)
+    const trueOriginalLimit = existingOriginalLimit ? existingOriginalLimit : String(previousLimit)
+
+    // 计算新限额，确保不超过200上限
+    const increasedAmount = 50
+    let newLimit = previousLimit + increasedAmount
+    if (newLimit > 200) {
+      newLimit = 200
+    }
+    newLimit = Number(newLimit.toFixed(6))
+
+    // 记录到当日申请集合（用于次日重置服务查找，允许多次申请）
+    await client.sadd(dailySetKey, keyData.id)
+
+    try {
+      // 只有在原始限额记录不存在时才设置，否则只刷新TTL（防止覆盖真正的原始值）
+      if (!existingOriginalLimit) {
+        await client.set(originalLimitKey, trueOriginalLimit, 'EXAT', expireAtSeconds)
+      } else {
+        await client.expireat(originalLimitKey, expireAtSeconds)
+      }
+      await client.hset(`apikey:${keyData.id}`, 'dailyCostLimit', String(newLimit))
+      await client.expireat(dailySetKey, expireAtSeconds)
+    } catch (error) {
+      // 回滚限额到之前的值（不移除 set 中的记录，因为可能之前已成功申请过）
+      await client
+        .hset(`apikey:${keyData.id}`, 'dailyCostLimit', String(previousLimit))
+        .catch((cleanupError) =>
+          logger.warn(
+            `⚠️ Failed to revert dailyCostLimit for key ${keyData.id} after error:`,
+            cleanupError
+          )
+        )
+      // 只有在本次新创建了原始限额记录时才删除它（保护已存在的原始值）
+      if (!existingOriginalLimit) {
+        await client
+          .del(originalLimitKey)
+          .catch((cleanupError) =>
+            logger.warn(
+              `⚠️ Failed to clean original limit key for ${keyData.id} after error:`,
+              cleanupError
+            )
+          )
+      }
+      throw error
+    }
+
+    const actualIncrease = newLimit - previousLimit
+    const reachedCap = newLimit >= 200
+
+    logger.api(
+      `💰 Quota increased for key ${keyData.name || keyData.id}: ${previousLimit} -> ${newLimit}${reachedCap ? ' (reached cap)' : ''}`
+    )
+
+    return res.json({
+      success: true,
+      message: reachedCap
+        ? `额度申请成功，当日限额已增加$${actualIncrease.toFixed(2)}，已达上限$200`
+        : `额度申请成功，当日限额已增加$${actualIncrease.toFixed(2)}`,
+      data: {
+        previousLimit,
+        newLimit,
+        increasedAmount: actualIncrease,
+        reachedCap
+      }
+    })
+  } catch (error) {
+    logger.error('❌ Failed to process quota increase request:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'internal_error',
+      message: '处理额度申请时发生错误，请稍后重试'
     })
   }
 })
