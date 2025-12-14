@@ -2034,6 +2034,161 @@ class RedisClient {
     return await this.getConcurrency(compositeKey)
   }
 
+  // 🔥 账号成功率熔断 - 记录请求结果并计算成功率
+  /**
+   * 记录账号请求成功率并返回统计结果（原子操作）
+   * 使用 Redis Sorted Set 实现滑动窗口统计
+   *
+   * @param {string} accountId - 账号ID
+   * @param {boolean} isSuccess - 请求是否成功（2xx为成功）
+   * @param {number} windowSeconds - 统计窗口大小（秒），默认60
+   * @returns {Promise<{total: number, success: number, rate: number}>}
+   */
+  async recordAccountSuccessRate(accountId, isSuccess, windowSeconds = 60) {
+    try {
+      const key = `account:sr:${accountId}`
+      const now = Date.now()
+      const windowMs = windowSeconds * 1000
+      const ttl = windowSeconds * 2 // TTL 为窗口的两倍，防止内存泄漏
+      const successFlag = isSuccess ? '1' : '0'
+
+      // Lua 脚本：原子性地清理过期数据、写入新结果、计算成功率
+      const luaScript = `
+        local key = KEYS[1]
+        local windowMs = tonumber(ARGV[1])
+        local now = tonumber(ARGV[2])
+        local successFlag = ARGV[3]
+        local ttl = tonumber(ARGV[4])
+
+        -- 1. 清理过期数据（now - windowMs 之前的数据）
+        local expireTime = now - windowMs
+        redis.call('ZREMRANGEBYSCORE', key, '-inf', expireTime)
+
+        -- 2. 写入新结果（member 格式: {0|1}:{timestamp}）
+        local member = successFlag .. ':' .. now
+        redis.call('ZADD', key, now, member)
+
+        -- 3. 设置 TTL
+        redis.call('EXPIRE', key, ttl)
+
+        -- 4. 统计总数
+        local total = redis.call('ZCARD', key)
+
+        -- 5. 统计成功数（member 以 '1:' 开头的记录）
+        local allMembers = redis.call('ZRANGE', key, 0, -1)
+        local success = 0
+        for i, m in ipairs(allMembers) do
+          if string.sub(m, 1, 2) == '1:' then
+            success = success + 1
+          end
+        end
+
+        -- 6. 计算成功率
+        local rate = 0
+        if total > 0 then
+          rate = success / total
+        end
+
+        return {total, success, tostring(rate)}
+      `
+
+      const result = await this.client.eval(luaScript, 1, key, windowMs, now, successFlag, ttl)
+
+      const stats = {
+        total: parseInt(result[0]) || 0,
+        success: parseInt(result[1]) || 0,
+        rate: parseFloat(result[2]) || 0
+      }
+
+      logger.debug(
+        `📊 Account ${accountId} success rate: ${(stats.rate * 100).toFixed(1)}% (${stats.success}/${stats.total}) in ${windowSeconds}s window`
+      )
+
+      return stats
+    } catch (error) {
+      logger.error(`❌ Failed to record account success rate for ${accountId}:`, error)
+      // 返回默认值，不影响正常请求流程
+      return { total: 0, success: 0, rate: 1 }
+    }
+  }
+
+  // 🔥 获取账号当前成功率（不写入新数据，仅查询）
+  /**
+   * 获取账号当前成功率统计（只读）
+   *
+   * @param {string} accountId - 账号ID
+   * @param {number} windowSeconds - 统计窗口大小（秒），默认60
+   * @returns {Promise<{total: number, success: number, rate: number}>}
+   */
+  async getAccountSuccessRate(accountId, windowSeconds = 60) {
+    try {
+      const key = `account:sr:${accountId}`
+      const now = Date.now()
+      const windowMs = windowSeconds * 1000
+
+      // Lua 脚本：清理过期数据并统计
+      const luaScript = `
+        local key = KEYS[1]
+        local windowMs = tonumber(ARGV[1])
+        local now = tonumber(ARGV[2])
+
+        -- 1. 清理过期数据
+        local expireTime = now - windowMs
+        redis.call('ZREMRANGEBYSCORE', key, '-inf', expireTime)
+
+        -- 2. 统计总数
+        local total = redis.call('ZCARD', key)
+        if total == 0 then
+          return {0, 0, '1'}
+        end
+
+        -- 3. 统计成功数
+        local allMembers = redis.call('ZRANGE', key, 0, -1)
+        local success = 0
+        for i, m in ipairs(allMembers) do
+          if string.sub(m, 1, 2) == '1:' then
+            success = success + 1
+          end
+        end
+
+        -- 4. 计算成功率
+        local rate = success / total
+
+        return {total, success, tostring(rate)}
+      `
+
+      const result = await this.client.eval(luaScript, 1, key, windowMs, now)
+
+      return {
+        total: parseInt(result[0]) || 0,
+        success: parseInt(result[1]) || 0,
+        rate: parseFloat(result[2]) || 1
+      }
+    } catch (error) {
+      logger.error(`❌ Failed to get account success rate for ${accountId}:`, error)
+      return { total: 0, success: 0, rate: 1 }
+    }
+  }
+
+  // 🔥 清除账号成功率统计数据
+  /**
+   * 清除账号的成功率统计数据
+   *
+   * @param {string} accountId - 账号ID
+   * @returns {Promise<boolean>}
+   */
+  async clearAccountSuccessRate(accountId) {
+    try {
+      const key = `account:sr:${accountId}`
+      await this.client.del(key)
+      logger.info(`🗑️ Cleared success rate data for account ${accountId}`)
+      return true
+    } catch (error) {
+      logger.error(`❌ Failed to clear account success rate for ${accountId}:`, error)
+      return false
+    }
+  }
+
   // 🔧 Basic Redis operations wrapper methods for convenience
   async get(key) {
     const client = this.getClientSafe()

@@ -96,6 +96,15 @@ class Application {
       const costRankService = require('./services/costRankService')
       await costRankService.initialize()
 
+      // 🚫 拦截 event_logging 请求（静默返回 404）
+      this.app.all('/api/api/event_logging/batch', (req, res) => {
+        logger.debug('🚫 Blocked event_logging batch request', {
+          method: req.method,
+          path: req.path
+        })
+        res.status(404).end()
+      })
+
       // 超早期拦截 /admin-next/ 请求 - 在所有中间件之前
       this.app.use((req, res, next) => {
         if (req.path === '/admin-next/' && req.method === 'GET') {

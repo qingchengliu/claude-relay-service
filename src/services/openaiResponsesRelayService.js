@@ -7,6 +7,7 @@ const apiKeyService = require('./apiKeyService')
 const unifiedOpenAIScheduler = require('./unifiedOpenAIScheduler')
 const config = require('../../config/config')
 const crypto = require('crypto')
+const { createOpenAIResponsesCircuitBreaker } = require('../utils/circuitBreakerHelper')
 
 // 抽取缓存写入 token，兼容多种字段命名
 function extractCacheCreationTokens(usageData) {
@@ -37,6 +38,14 @@ function extractCacheCreationTokens(usageData) {
 class OpenAIResponsesRelayService {
   constructor() {
     this.defaultTimeout = config.requestTimeout || 600000
+  }
+
+  /**
+   * 🔥 检查并触发成功率熔断器（委托到 circuitBreakerHelper）
+   */
+  async _checkAndTriggerCircuitBreaker(accountId, isSuccess, accountName = '', sessionHash = null) {
+    const circuitBreaker = createOpenAIResponsesCircuitBreaker(unifiedOpenAIScheduler)
+    return circuitBreaker(accountId, isSuccess, accountName, sessionHash)
   }
 
   // 处理请求转发
@@ -139,6 +148,9 @@ class OpenAIResponsesRelayService {
           req.body?.stream,
           sessionHash
         )
+
+        // 🔥 熔断器：记录失败（429限流）
+        await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
 
         // 返回错误响应（使用处理后的数据，避免循环引用）
         const errorResponse = errorData || {
@@ -249,12 +261,18 @@ class OpenAIResponsesRelayService {
           req.removeListener('close', handleClientDisconnect)
           res.removeListener('close', handleClientDisconnect)
 
+          // 🔥 熔断器：记录失败（401未授权）
+          await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
+
           return res.status(401).json(unauthorizedResponse)
         }
 
         // 清理监听器
         req.removeListener('close', handleClientDisconnect)
         res.removeListener('close', handleClientDisconnect)
+
+        // 🔥 熔断器：记录失败（其他错误状态码）
+        await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
 
         return res.status(response.status).json(errorData)
       }
@@ -273,12 +291,20 @@ class OpenAIResponsesRelayService {
           apiKeyData,
           req.body?.model,
           handleClientDisconnect,
-          req
+          req,
+          sessionHash
         )
       }
 
       // 处理非流式响应
-      return this._handleNormalResponse(response, res, account, apiKeyData, req.body?.model)
+      return this._handleNormalResponse(
+        response,
+        res,
+        account,
+        apiKeyData,
+        req.body?.model,
+        sessionHash
+      )
     } catch (error) {
       // 清理 AbortController
       if (abortController && !abortController.signal.aborted) {
@@ -293,6 +319,9 @@ class OpenAIResponsesRelayService {
         statusText: error.response?.statusText
       }
       logger.error('OpenAI-Responses relay error:', errorInfo)
+
+      // 🔥 熔断器：记录失败（catch 捕获的请求错误）
+      await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
 
       // 检查是否是网络错误
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
@@ -418,7 +447,8 @@ class OpenAIResponsesRelayService {
     apiKeyData,
     requestedModel,
     handleClientDisconnect,
-    req
+    req,
+    sessionHash = null
   ) {
     // 设置 SSE 响应头
     res.setHeader('Content-Type', 'text/event-stream')
@@ -664,11 +694,6 @@ class OpenAIResponsesRelayService {
       // 如果在流式响应中检测到限流
       if (rateLimitDetected) {
         // 使用统一调度器处理限流（与非流式响应保持一致）
-        const sessionId = req.headers['session_id'] || req.body?.session_id
-        const sessionHash = sessionId
-          ? crypto.createHash('sha256').update(sessionId).digest('hex')
-          : null
-
         await unifiedOpenAIScheduler.markAccountRateLimited(
           account.id,
           'openai-responses',
@@ -680,6 +705,15 @@ class OpenAIResponsesRelayService {
           `🚫 Processing rate limit for OpenAI-Responses account ${account.id} from stream`
         )
       }
+
+      // 🔥 熔断器：流式响应结束时记录结果
+      // 如果检测到限流错误，记录为失败；否则记录为成功
+      await this._checkAndTriggerCircuitBreaker(
+        account.id,
+        !rateLimitDetected,
+        account.name,
+        sessionHash
+      )
 
       // 清理监听器
       req.removeListener('close', handleClientDisconnect)
@@ -696,9 +730,12 @@ class OpenAIResponsesRelayService {
       })
     })
 
-    response.data.on('error', (error) => {
+    response.data.on('error', async (error) => {
       streamEnded = true
       logger.error('Stream error:', error)
+
+      // 🔥 熔断器：记录失败（流式错误）
+      await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
 
       // 清理监听器
       req.removeListener('close', handleClientDisconnect)
@@ -727,7 +764,14 @@ class OpenAIResponsesRelayService {
   }
 
   // 处理非流式响应
-  async _handleNormalResponse(response, res, account, apiKeyData, requestedModel) {
+  async _handleNormalResponse(
+    response,
+    res,
+    account,
+    apiKeyData,
+    requestedModel,
+    sessionHash = null
+  ) {
     const responseData = response.data
 
     // 提取 usage 数据和实际 model
@@ -807,6 +851,9 @@ class OpenAIResponsesRelayService {
         logger.error('📊 Failed to run OpenAI-Responses non-stream statistics hook:', hookError)
       }
     }
+
+    // 🔥 熔断器：记录成功（非流式响应成功完成）
+    await this._checkAndTriggerCircuitBreaker(account.id, true, account.name, sessionHash)
 
     // 返回响应
     res.status(response.status).json(responseData)

@@ -9,6 +9,7 @@ const {
   sanitizeErrorMessage,
   isAccountDisabledError
 } = require('../utils/errorSanitizer')
+const { createClaudeConsoleCircuitBreaker } = require('../utils/circuitBreakerHelper')
 
 class ClaudeConsoleRelayService {
   constructor() {
@@ -115,6 +116,16 @@ class ClaudeConsoleRelayService {
       }
     }
     return 0
+  }
+
+  /**
+   * 🔥 检查并触发成功率熔断器（委托到 circuitBreakerHelper）
+   */
+  async _checkAndTriggerCircuitBreaker(accountId, isSuccess, accountName = '') {
+    const circuitBreaker = createClaudeConsoleCircuitBreaker(
+      claudeConsoleAccountService.markAccountRateLimited.bind(claudeConsoleAccountService)
+    )
+    return circuitBreaker(accountId, isSuccess, accountName)
   }
 
   async _selectUserAgent(clientHeaders, account) {
@@ -433,6 +444,16 @@ class ClaudeConsoleRelayService {
         if (isOverloaded) {
           await claudeConsoleAccountService.removeAccountOverload(accountId)
         }
+
+        // 🔥 熔断器：记录成功
+        await this._checkAndTriggerCircuitBreaker(accountId, true, account?.name)
+      }
+
+      // 🔥 熔断器：记录失败（非2xx响应，且不是429/529/401/accountDisabled已单独处理的情况）
+      if (response.status < 200 || response.status >= 300) {
+        // 注意：429/529/401/accountDisabled 已经触发了 markAccountRateLimited/Overloaded/Unauthorized
+        // 但仍然需要记录到熔断器统计中
+        await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
       }
 
       // 更新最后使用时间
@@ -485,6 +506,9 @@ class ClaudeConsoleRelayService {
         `❌ Claude Console relay request failed (Account: ${account?.name || accountId}):`,
         error.message
       )
+
+      // 🔥 熔断器：记录失败（请求异常）
+      await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
 
       // 不再因为模型不支持而block账号
 
@@ -671,6 +695,7 @@ class ClaudeConsoleRelayService {
     requestOptions = {}
   ) {
     const userAgent = await this._selectUserAgent(clientHeaders, account)
+    const self = this // 保存 this 引用，用于 Promise 回调中调用熔断检查
     return new Promise((resolve, reject) => {
       let aborted = false
 
@@ -843,6 +868,10 @@ class ClaudeConsoleRelayService {
                   responseStream.end()
                 }
               }
+
+              // 🔥 熔断器：记录失败（流式错误响应）
+              await self._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+
               resolve() // 不抛出异常，正常完成流处理
             })
 
@@ -1093,7 +1122,7 @@ class ClaudeConsoleRelayService {
             }
           })
 
-          response.data.on('end', () => {
+          response.data.on('end', async () => {
             try {
               // 处理缓冲区中剩余的数据
               if (buffer.trim() && !responseStream.destroyed) {
@@ -1163,6 +1192,9 @@ class ClaudeConsoleRelayService {
                 responseStream.end()
               }
 
+              // 🔥 熔断器：记录成功（流式成功完成）
+              await self._checkAndTriggerCircuitBreaker(accountId, true, account?.name)
+
               logger.debug('🌊 Claude Console Claude stream response completed')
               resolve()
             } catch (error) {
@@ -1171,7 +1203,7 @@ class ClaudeConsoleRelayService {
             }
           })
 
-          response.data.on('error', (error) => {
+          response.data.on('error', async (error) => {
             logger.error(
               `❌ Claude Console stream error (Account: ${account?.name || accountId}):`,
               error
@@ -1194,10 +1226,14 @@ class ClaudeConsoleRelayService {
               }
               responseStream.end()
             }
+
+            // 🔥 熔断器：记录失败（流式传输错误）
+            await self._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+
             reject(error)
           })
         })
-        .catch((error) => {
+        .catch(async (error) => {
           if (aborted) {
             return
           }
@@ -1228,7 +1264,7 @@ class ClaudeConsoleRelayService {
                 : ''
 
               // 检查是否包含限流关键词
-              const matchedKeyword = this.rateLimitKeywords.find(
+              const matchedKeyword = self.rateLimitKeywords.find(
                 (kw) => errorText && errorText.includes(kw)
               )
               if (matchedKeyword) {
@@ -1239,6 +1275,9 @@ class ClaudeConsoleRelayService {
               }
             }
           }
+
+          // 🔥 熔断器：记录失败（axios catch 捕获的请求错误）
+          await self._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
 
           // 发送错误响应
           if (!responseStream.headersSent) {
