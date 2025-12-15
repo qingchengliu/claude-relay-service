@@ -8,27 +8,42 @@ const config = require('../../config/config')
 const logger = require('./logger')
 
 /**
- * 判断是否为客户端参数错误（不应计入熔断统计）
+ * 判断是否为应排除的错误（不应计入熔断统计）
+ * 包括：客户端参数错误、内部错误（未到达上游API）
  * @param {string|Object} errorInfo - 错误信息
- * @returns {boolean} - 是否为参数错误
+ * @returns {boolean} - 是否应排除
  */
-function isClientParameterError(errorInfo) {
+function isExcludedError(errorInfo) {
   if (!errorInfo) return false
 
   const errorStr = typeof errorInfo === 'string' ? errorInfo : JSON.stringify(errorInfo)
   const lowerStr = errorStr.toLowerCase()
 
-  // 客户端参数错误关键词（不应计入熔断统计）
-  const clientErrorPatterns = [
+  // 不应计入熔断统计的错误模式（内部错误 + 客户端参数错误）
+  // 注意：所有模式使用小写，因为比较时 errorStr 已转为小写
+  const excludeErrorPatterns = [
+    // 客户端参数错误
     'invalid_request_error',
     'invalid request',
     'bad request',
-    'Invalid URL',
+    'invalid url',
     'sensitive_words_detected', // 敏感词检测（客户端内容问题）
-    'concurrency limit exceeded' // 内部并发限制（未到达上游）
+
+    // 内部并发限制（未到达上游）
+    'concurrency limit exceeded',
+    'concurrency limit reached',
+    'console_account_concurrency_full',
+
+    // 内部错误（账户/连接问题，未到达上游）
+    'account not found',
+    'client disconnected',
+    'aborterror',
+    'cancelederror',
+    'econnaborted',
+    'err_canceled'
   ]
 
-  return clientErrorPatterns.some((pattern) => lowerStr.includes(pattern))
+  return excludeErrorPatterns.some((pattern) => lowerStr.includes(pattern))
 }
 
 /**
@@ -63,10 +78,10 @@ async function checkAndTriggerCircuitBreaker(options) {
     return false
   }
 
-  // 🔥 如果是失败且为客户端参数错误，则不记录到统计中
-  if (!isSuccess && errorInfo && isClientParameterError(errorInfo)) {
+  // 🔥 如果是失败且为应排除的错误（内部错误/客户端参数错误），则不记录到统计中
+  if (!isSuccess && errorInfo && isExcludedError(errorInfo)) {
     logger.debug(
-      `⏭️ Circuit breaker skip [${serviceType}] ${accountName || accountId}: client parameter error`
+      `⏭️ Circuit breaker skip [${serviceType}] ${accountName || accountId}: excluded error (internal/client)`
     )
     return false
   }
@@ -151,5 +166,5 @@ module.exports = {
   checkAndTriggerCircuitBreaker,
   createClaudeConsoleCircuitBreaker,
   createOpenAIResponsesCircuitBreaker,
-  isClientParameterError
+  isExcludedError
 }
