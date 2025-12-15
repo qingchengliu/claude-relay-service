@@ -24,7 +24,8 @@ function isClientParameterError(errorInfo) {
     'invalid request',
     'bad request',
     'Invalid URL',
-    'sensitive_words_detected' // 敏感词检测（客户端内容问题）
+    'sensitive_words_detected', // 敏感词检测（客户端内容问题）
+    'concurrency limit exceeded' // 内部并发限制（未到达上游）
   ]
 
   return clientErrorPatterns.some((pattern) => lowerStr.includes(pattern))
