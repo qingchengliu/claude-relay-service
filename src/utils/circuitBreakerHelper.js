@@ -8,6 +8,29 @@ const config = require('../../config/config')
 const logger = require('./logger')
 
 /**
+ * 判断是否为客户端参数错误（不应计入熔断统计）
+ * @param {string|Object} errorInfo - 错误信息
+ * @returns {boolean} - 是否为参数错误
+ */
+function isClientParameterError(errorInfo) {
+  if (!errorInfo) return false
+
+  const errorStr = typeof errorInfo === 'string' ? errorInfo : JSON.stringify(errorInfo)
+  const lowerStr = errorStr.toLowerCase()
+
+  // 客户端参数错误关键词（不应计入熔断统计）
+  const clientErrorPatterns = [
+    'invalid_request_error',
+    'invalid request',
+    'bad request',
+    'Invalid URL',
+    'sensitive_words_detected' // 敏感词检测（客户端内容问题）
+  ]
+
+  return clientErrorPatterns.some((pattern) => lowerStr.includes(pattern))
+}
+
+/**
  * 记录请求结果并检查是否需要触发熔断
  * @param {Object} options - 配置选项
  * @param {string} options.accountId - 账号ID
@@ -16,6 +39,7 @@ const logger = require('./logger')
  * @param {string} options.serviceType - 服务类型：'claude-console' | 'openai-responses'
  * @param {Function} options.markRateLimitedFn - 标记账号限流的函数
  * @param {string|null} options.sessionHash - 会话哈希（可选，OpenAI Responses 需要）
+ * @param {string|Object|null} options.errorInfo - 错误信息（用于判断是否为客户端参数错误）
  * @returns {Promise<boolean>} - 是否触发了熔断
  */
 async function checkAndTriggerCircuitBreaker(options) {
@@ -25,7 +49,8 @@ async function checkAndTriggerCircuitBreaker(options) {
     accountName = '',
     serviceType,
     markRateLimitedFn,
-    sessionHash = null
+    sessionHash = null,
+    errorInfo = null
   } = options
 
   // 获取对应服务的配置
@@ -34,6 +59,14 @@ async function checkAndTriggerCircuitBreaker(options) {
 
   // 检查是否启用熔断器
   if (!serviceConfig?.enableSuccessRateCircuitBreaker) {
+    return false
+  }
+
+  // 🔥 如果是失败且为客户端参数错误，则不记录到统计中
+  if (!isSuccess && errorInfo && isClientParameterError(errorInfo)) {
+    logger.debug(
+      `⏭️ Circuit breaker skip [${serviceType}] ${accountName || accountId}: client parameter error`
+    )
     return false
   }
 
@@ -78,11 +111,12 @@ async function checkAndTriggerCircuitBreaker(options) {
  * @returns {Function} - 熔断器检查函数
  */
 function createClaudeConsoleCircuitBreaker(markAccountRateLimited) {
-  return async (accountId, isSuccess, accountName = '') => {
+  return async (accountId, isSuccess, accountName = '', errorInfo = null) => {
     return checkAndTriggerCircuitBreaker({
       accountId,
       isSuccess,
       accountName,
+      errorInfo,
       serviceType: 'claude-console',
       markRateLimitedFn: async (id) => {
         await markAccountRateLimited(id)
@@ -97,13 +131,14 @@ function createClaudeConsoleCircuitBreaker(markAccountRateLimited) {
  * @returns {Function} - 熔断器检查函数
  */
 function createOpenAIResponsesCircuitBreaker(unifiedOpenAIScheduler) {
-  return async (accountId, isSuccess, accountName = '', sessionHash = null) => {
+  return async (accountId, isSuccess, accountName = '', sessionHash = null, errorInfo = null) => {
     return checkAndTriggerCircuitBreaker({
       accountId,
       isSuccess,
       accountName,
-      serviceType: 'openai-responses',
       sessionHash,
+      errorInfo,
+      serviceType: 'openai-responses',
       markRateLimitedFn: async (id, hash) => {
         await unifiedOpenAIScheduler.markAccountRateLimited(id, 'openai-responses', hash)
       }
@@ -114,5 +149,6 @@ function createOpenAIResponsesCircuitBreaker(unifiedOpenAIScheduler) {
 module.exports = {
   checkAndTriggerCircuitBreaker,
   createClaudeConsoleCircuitBreaker,
-  createOpenAIResponsesCircuitBreaker
+  createOpenAIResponsesCircuitBreaker,
+  isClientParameterError
 }

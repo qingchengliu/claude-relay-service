@@ -43,9 +43,15 @@ class OpenAIResponsesRelayService {
   /**
    * 🔥 检查并触发成功率熔断器（委托到 circuitBreakerHelper）
    */
-  async _checkAndTriggerCircuitBreaker(accountId, isSuccess, accountName = '', sessionHash = null) {
+  async _checkAndTriggerCircuitBreaker(
+    accountId,
+    isSuccess,
+    accountName = '',
+    sessionHash = null,
+    errorInfo = null
+  ) {
     const circuitBreaker = createOpenAIResponsesCircuitBreaker(unifiedOpenAIScheduler)
-    return circuitBreaker(accountId, isSuccess, accountName, sessionHash)
+    return circuitBreaker(accountId, isSuccess, accountName, sessionHash, errorInfo)
   }
 
   // 处理请求转发
@@ -150,7 +156,13 @@ class OpenAIResponsesRelayService {
         )
 
         // 🔥 熔断器：记录失败（429限流）
-        await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
+        await this._checkAndTriggerCircuitBreaker(
+          account.id,
+          false,
+          account.name,
+          sessionHash,
+          errorData
+        )
 
         // 返回错误响应（使用处理后的数据，避免循环引用）
         const errorResponse = errorData || {
@@ -262,7 +274,13 @@ class OpenAIResponsesRelayService {
           res.removeListener('close', handleClientDisconnect)
 
           // 🔥 熔断器：记录失败（401未授权）
-          await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
+          await this._checkAndTriggerCircuitBreaker(
+            account.id,
+            false,
+            account.name,
+            sessionHash,
+            errorData
+          )
 
           return res.status(401).json(unauthorizedResponse)
         }
@@ -272,7 +290,13 @@ class OpenAIResponsesRelayService {
         res.removeListener('close', handleClientDisconnect)
 
         // 🔥 熔断器：记录失败（其他错误状态码）
-        await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
+        await this._checkAndTriggerCircuitBreaker(
+          account.id,
+          false,
+          account.name,
+          sessionHash,
+          errorData
+        )
 
         return res.status(response.status).json(errorData)
       }
@@ -321,7 +345,13 @@ class OpenAIResponsesRelayService {
       logger.error('OpenAI-Responses relay error:', errorInfo)
 
       // 🔥 熔断器：记录失败（catch 捕获的请求错误）
-      await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
+      await this._checkAndTriggerCircuitBreaker(
+        account.id,
+        false,
+        account.name,
+        sessionHash,
+        error.response?.data || error.message
+      )
 
       // 检查是否是网络错误
       if (error.code === 'ECONNREFUSED' || error.code === 'ETIMEDOUT') {
@@ -735,7 +765,13 @@ class OpenAIResponsesRelayService {
       logger.error('Stream error:', error)
 
       // 🔥 熔断器：记录失败（流式错误）
-      await this._checkAndTriggerCircuitBreaker(account.id, false, account.name, sessionHash)
+      await this._checkAndTriggerCircuitBreaker(
+        account.id,
+        false,
+        account.name,
+        sessionHash,
+        error.message
+      )
 
       // 清理监听器
       req.removeListener('close', handleClientDisconnect)

@@ -121,11 +121,11 @@ class ClaudeConsoleRelayService {
   /**
    * 🔥 检查并触发成功率熔断器（委托到 circuitBreakerHelper）
    */
-  async _checkAndTriggerCircuitBreaker(accountId, isSuccess, accountName = '') {
+  async _checkAndTriggerCircuitBreaker(accountId, isSuccess, accountName = '', errorInfo = null) {
     const circuitBreaker = createClaudeConsoleCircuitBreaker(
       claudeConsoleAccountService.markAccountRateLimited.bind(claudeConsoleAccountService)
     )
-    return circuitBreaker(accountId, isSuccess, accountName)
+    return circuitBreaker(accountId, isSuccess, accountName, errorInfo)
   }
 
   async _selectUserAgent(clientHeaders, account) {
@@ -453,7 +453,7 @@ class ClaudeConsoleRelayService {
       if (response.status < 200 || response.status >= 300) {
         // 注意：429/529/401/accountDisabled 已经触发了 markAccountRateLimited/Overloaded/Unauthorized
         // 但仍然需要记录到熔断器统计中
-        await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+        await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name, response.data)
       }
 
       // 更新最后使用时间
@@ -508,7 +508,12 @@ class ClaudeConsoleRelayService {
       )
 
       // 🔥 熔断器：记录失败（请求异常）
-      await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+      await this._checkAndTriggerCircuitBreaker(
+        accountId,
+        false,
+        account?.name,
+        error.response?.data || error.message
+      )
 
       // 不再因为模型不支持而block账号
 
@@ -870,7 +875,12 @@ class ClaudeConsoleRelayService {
               }
 
               // 🔥 熔断器：记录失败（流式错误响应）
-              await self._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+              await self._checkAndTriggerCircuitBreaker(
+                accountId,
+                false,
+                account?.name,
+                errorDataForCheck
+              )
 
               resolve() // 不抛出异常，正常完成流处理
             })
@@ -1228,7 +1238,12 @@ class ClaudeConsoleRelayService {
             }
 
             // 🔥 熔断器：记录失败（流式传输错误）
-            await self._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+            await self._checkAndTriggerCircuitBreaker(
+              accountId,
+              false,
+              account?.name,
+              error.message
+            )
 
             reject(error)
           })
@@ -1277,7 +1292,12 @@ class ClaudeConsoleRelayService {
           }
 
           // 🔥 熔断器：记录失败（axios catch 捕获的请求错误）
-          await self._checkAndTriggerCircuitBreaker(accountId, false, account?.name)
+          await self._checkAndTriggerCircuitBreaker(
+            accountId,
+            false,
+            account?.name,
+            error.response?.data || error.message
+          )
 
           // 发送错误响应
           if (!responseStream.headersSent) {
