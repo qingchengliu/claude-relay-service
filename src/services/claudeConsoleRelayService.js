@@ -12,6 +12,9 @@ const {
 } = require('../utils/errorSanitizer')
 const { createClaudeConsoleCircuitBreaker } = require('../utils/circuitBreakerHelper')
 
+// 🔒 本地内存缓存：固定每日 session_id
+const fixedSessionLocalCache = new Map()
+
 class ClaudeConsoleRelayService {
   constructor() {
     this.defaultUserAgent = 'claude-cli/2.0.52 (external, cli)'
@@ -245,6 +248,9 @@ class ClaudeConsoleRelayService {
           }
         }
       }
+
+      // 🔒 应用固定的每日 session_id（在统一客户端标识处理之后）
+      this._applyFixedDailySession(modifiedRequestBody, accountId)
 
       // 模型兼容性检查已经在调度器中完成，这里不需要再检查
 
@@ -724,25 +730,29 @@ class ClaudeConsoleRelayService {
     requestOptions = {}
   ) {
     const userAgent = await this._selectUserAgent(clientHeaders, account)
+
+    // 处理统一的客户端标识（全局开关，流式）
+    if (
+      config.claudeConsole &&
+      config.claudeConsole.useUnifiedClientId &&
+      config.claudeConsole.unifiedClientId
+    ) {
+      const uid = body?.metadata?.user_id
+      if (uid) {
+        const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
+        if (m && m[1]) {
+          body.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+          logger.info(`🔄 Replaced client ID with unified ID: ${body.metadata.user_id}`)
+        }
+      }
+    }
+
+    // 🔒 应用固定的每日 session_id（在统一客户端标识处理之后，流式）
+    this._applyFixedDailySession(body, accountId)
+
     const self = this // 保存 this 引用，用于 Promise 回调中调用熔断检查
     return new Promise((resolve, reject) => {
       let aborted = false
-
-      // 处理统一的客户端标识（全局开关，流式）
-      if (
-        config.claudeConsole &&
-        config.claudeConsole.useUnifiedClientId &&
-        config.claudeConsole.unifiedClientId
-      ) {
-        const uid = body?.metadata?.user_id
-        if (uid) {
-          const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
-          if (m && m[1]) {
-            body.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
-            logger.info(`🔄 Replaced client ID with unified ID: ${body.metadata.user_id}`)
-          }
-        }
-      }
 
       // 构建完整的API URL
       const cleanUrl = account.apiUrl.replace(/\/$/, '') // 移除末尾斜杠
@@ -1554,6 +1564,60 @@ class ClaudeConsoleRelayService {
         error: error.message,
         timestamp: new Date().toISOString()
       }
+    }
+  }
+
+  /**
+   * 🔒 应用固定的每日 session_id（如果账户在配置列表中）
+   * 使用本地内存缓存，每天第一次请求时捕获 session_id，当天后续请求使用缓存值
+   * @param {Object} body - 请求体（会直接修改）
+   * @param {string} accountId - 账户 ID
+   */
+  _applyFixedDailySession(body, accountId) {
+    try {
+      // 1. 检查账户是否在固定列表中
+      const fixedAccounts = config.claudeConsole?.fixedSessionAccountIds || []
+      if (!fixedAccounts.includes(accountId)) {
+        return
+      }
+
+      // 2. 检查是否有 metadata.user_id
+      if (!body?.metadata?.user_id) {
+        return
+      }
+
+      // 3. 从 metadata.user_id 提取客户端传入的 session_id
+      const userId = body.metadata.user_id
+      const clientSessionId = userId.match(/session_([a-f0-9-]{36})/)?.[1]
+      if (!clientSessionId) {
+        return
+      }
+
+      // 4. 查询本地内存缓存
+      const today = redis.getDateStringInTimezone()
+      const cacheKey = `${accountId}:${today}`
+      let fixedSessionId = fixedSessionLocalCache.get(cacheKey)
+
+      if (!fixedSessionId) {
+        // 5. 缓存未命中，捕获并缓存
+        fixedSessionId = clientSessionId
+        fixedSessionLocalCache.set(cacheKey, fixedSessionId)
+        logger.info(`🔒 [FixedSession] Captured session_id for ${accountId}: ${fixedSessionId}`)
+
+        // 6. 清理该账号的旧缓存（跨天时触发）
+        for (const key of fixedSessionLocalCache.keys()) {
+          if (key.startsWith(`${accountId}:`) && key !== cacheKey) {
+            fixedSessionLocalCache.delete(key)
+          }
+        }
+      }
+
+      // 7. 替换 session_id
+      if (clientSessionId !== fixedSessionId) {
+        body.metadata.user_id = userId.replace(/session_[a-f0-9-]{36}/, `session_${fixedSessionId}`)
+      }
+    } catch (error) {
+      logger.error(`❌ [FixedSession] Error for ${accountId}:`, error.message)
     }
   }
 }
