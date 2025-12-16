@@ -2,6 +2,8 @@ const Redis = require('ioredis')
 const config = require('../../config/config')
 const logger = require('../utils/logger')
 
+const CONSOLE_401_THRESHOLD = 5
+
 // 时区辅助函数
 // 注意：这个函数的目的是获取某个时间点在目标时区的"本地"表示
 // 例如：UTC时间 2025-07-30 01:00:00 在 UTC+8 时区表示为 2025-07-30 09:00:00
@@ -2367,6 +2369,43 @@ class RedisClient {
       }
     }
   }
+
+  // 计算距离下一个本地零点的秒数（包含48小时缓冲）
+  getSecondsUntilMidnight() {
+    const offset = config.system.timezoneOffset || 8
+    const now = new Date()
+    const offsetMs = offset * 3600000
+    const tzNow = new Date(now.getTime() + offsetMs)
+    const nextMidnight = new Date(tzNow)
+    nextMidnight.setUTCHours(24, 0, 0, 0)
+
+    const secondsUntilMidnight = Math.max(0, Math.floor((nextMidnight - tzNow) / 1000))
+    return secondsUntilMidnight + 48 * 3600
+  }
+
+  // Console 401 每日计数
+  async incrementConsole401DailyCount(accountId) {
+    const client = this.getClientSafe()
+    const date = getDateStringInTimezone()
+    const key = `claude_console:401_daily:${accountId}:${date}`
+
+    try {
+      const count = await client.incr(key)
+
+      if (count === 1) {
+        await client.expire(key, this.getSecondsUntilMidnight())
+      }
+
+      logger.info(`[Console 401] Incremented count for account ${accountId}: ${count} (date: ${date})`)
+      return count
+    } catch (error) {
+      logger.error(
+        `[Console 401] Failed to increment count for account ${accountId} (date: ${date}):`,
+        error
+      )
+      throw error
+    }
+  }
 }
 
 const redisClient = new RedisClient()
@@ -2408,5 +2447,6 @@ redisClient.getDateInTimezone = getDateInTimezone
 redisClient.getDateStringInTimezone = getDateStringInTimezone
 redisClient.getHourInTimezone = getHourInTimezone
 redisClient.getWeekStringInTimezone = getWeekStringInTimezone
+redisClient.CONSOLE_401_THRESHOLD = CONSOLE_401_THRESHOLD
 
 module.exports = redisClient

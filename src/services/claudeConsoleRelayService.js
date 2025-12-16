@@ -2,6 +2,7 @@ const axios = require('axios')
 const { v4: uuidv4 } = require('uuid')
 const claudeConsoleAccountService = require('./claudeConsoleAccountService')
 const redis = require('../models/redis')
+const { incrementConsole401DailyCount, CONSOLE_401_THRESHOLD } = redis
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const {
@@ -413,8 +414,31 @@ class ClaudeConsoleRelayService {
 
       // 检查错误状态并相应处理
       if (response.status === 401) {
-        logger.warn(`🚫 Unauthorized error detected for Claude Console account ${accountId}`)
-        await claudeConsoleAccountService.markAccountUnauthorized(accountId)
+        let count = 0
+        let shouldConvertTo429 = false
+
+        try {
+          count = await incrementConsole401DailyCount(accountId)
+          shouldConvertTo429 = count <= CONSOLE_401_THRESHOLD
+        } catch (countError) {
+          logger.error(
+            `[Console 401] Failed to increment count for account ${accountId}:`,
+            countError.message
+          )
+        }
+
+        if (shouldConvertTo429) {
+          logger.info(
+            `[Console 401] Converting 401 to 429 for account ${accountId} (count: ${count}/${CONSOLE_401_THRESHOLD})`
+          )
+          effectiveStatusCode = 429
+          await claudeConsoleAccountService.markAccountRateLimited(accountId)
+        } else {
+          logger.warn(
+            `[Console 401] Account ${accountId} exceeded threshold (count: ${count}), keeping 401`
+          )
+          await claudeConsoleAccountService.markAccountUnauthorized(accountId)
+        }
       } else if (accountDisabledError) {
         logger.error(
           `🚫 Account disabled error (400) detected for Claude Console account ${accountId}, marking as blocked`
@@ -821,7 +845,31 @@ class ClaudeConsoleRelayService {
               }
 
               if (response.status === 401) {
-                await claudeConsoleAccountService.markAccountUnauthorized(accountId)
+                let count = 0
+                let shouldConvertTo429 = false
+
+                try {
+                  count = await incrementConsole401DailyCount(accountId)
+                  shouldConvertTo429 = count <= CONSOLE_401_THRESHOLD
+                } catch (countError) {
+                  logger.error(
+                    `[Console 401] Failed to increment count for account ${accountId}:`,
+                    countError.message
+                  )
+                }
+
+                if (shouldConvertTo429) {
+                  logger.info(
+                    `[Console 401] Converting 401 to 429 for account ${accountId} (count: ${count}/${CONSOLE_401_THRESHOLD})`
+                  )
+                  effectiveStatusCode = 429
+                  await claudeConsoleAccountService.markAccountRateLimited(accountId)
+                } else {
+                  logger.warn(
+                    `[Console 401] Account ${accountId} exceeded threshold (count: ${count}), keeping 401`
+                  )
+                  await claudeConsoleAccountService.markAccountUnauthorized(accountId)
+                }
               } else if (accountDisabledError) {
                 logger.error(
                   `🚫 [Stream] Account disabled error (400) detected for Claude Console account ${accountId}, marking as blocked`
