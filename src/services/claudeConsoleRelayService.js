@@ -2,7 +2,7 @@ const axios = require('axios')
 const { v4: uuidv4 } = require('uuid')
 const claudeConsoleAccountService = require('./claudeConsoleAccountService')
 const redis = require('../models/redis')
-const { incrementConsole401DailyCount, CONSOLE_401_THRESHOLD } = redis
+const { CONSOLE_401_THRESHOLD } = redis
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const {
@@ -418,7 +418,7 @@ class ClaudeConsoleRelayService {
         let shouldConvertTo429 = false
 
         try {
-          count = await incrementConsole401DailyCount(accountId)
+          count = await redis.incrementConsole401DailyCount(accountId)
           shouldConvertTo429 = count <= CONSOLE_401_THRESHOLD
         } catch (countError) {
           logger.error(
@@ -849,7 +849,7 @@ class ClaudeConsoleRelayService {
                 let shouldConvertTo429 = false
 
                 try {
-                  count = await incrementConsole401DailyCount(accountId)
+                  count = await redis.incrementConsole401DailyCount(accountId)
                   shouldConvertTo429 = count <= CONSOLE_401_THRESHOLD
                 } catch (countError) {
                   logger.error(
