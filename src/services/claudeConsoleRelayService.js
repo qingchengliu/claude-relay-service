@@ -343,7 +343,7 @@ class ClaudeConsoleRelayService {
         JSON.stringify(requestConfig.headers, null, 2)
       )
       logger.info(
-        `📤 [Request to downstream] metadata.user_id: ${modifiedRequestBody?.metadata?.user_id || 'undefined'}`
+        `📤 [Request to downstream] Account: ${account.name} (...${accountId.slice(-5)}), metadata.user_id: ${modifiedRequestBody?.metadata?.user_id || 'undefined'}`
       )
       const response = await axios(requestConfig)
 
@@ -810,7 +810,7 @@ class ClaudeConsoleRelayService {
 
       // 发送请求
       logger.info(
-        `📤 [Stream request to downstream] metadata.user_id: ${body?.metadata?.user_id || 'undefined'}`
+        `📤 [Stream request to downstream] Account: ${account.name} (...${accountId.slice(-5)}), metadata.user_id: ${body?.metadata?.user_id || 'undefined'}`
       )
       const request = axios(requestConfig)
 
