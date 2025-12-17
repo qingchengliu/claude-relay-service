@@ -342,6 +342,9 @@ class ClaudeConsoleRelayService {
         '📤 Sending request to Claude Console API with headers:',
         JSON.stringify(requestConfig.headers, null, 2)
       )
+      logger.info(
+        `📤 [Request to downstream] metadata.user_id: ${modifiedRequestBody?.metadata?.user_id || 'undefined'}`
+      )
       const response = await axios(requestConfig)
 
       // 移除监听器（请求成功完成）
@@ -806,6 +809,9 @@ class ClaudeConsoleRelayService {
       }
 
       // 发送请求
+      logger.info(
+        `📤 [Stream request to downstream] metadata.user_id: ${body?.metadata?.user_id || 'undefined'}`
+      )
       const request = axios(requestConfig)
 
       request
