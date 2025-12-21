@@ -478,15 +478,20 @@ class ClaudeConsoleRelayService {
           await claudeConsoleAccountService.removeAccountOverload(accountId)
         }
 
-        // 🔥 熔断器：记录成功
-        await this._checkAndTriggerCircuitBreaker(accountId, true, account?.name)
+        // 🔥 熔断器：记录成功（count_tokens 请求跳过统计）
+        if (!options.customPath?.includes('count_tokens')) {
+          await this._checkAndTriggerCircuitBreaker(accountId, true, account?.name)
+        }
       }
 
       // 🔥 熔断器：记录失败（非2xx响应，且不是429/529/401/accountDisabled已单独处理的情况）
+      // count_tokens 请求跳过统计
       if (response.status < 200 || response.status >= 300) {
         // 注意：429/529/401/accountDisabled 已经触发了 markAccountRateLimited/Overloaded/Unauthorized
         // 但仍然需要记录到熔断器统计中
-        await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name, response.data)
+        if (!options.customPath?.includes('count_tokens')) {
+          await this._checkAndTriggerCircuitBreaker(accountId, false, account?.name, response.data)
+        }
       }
 
       // 更新最后使用时间
@@ -540,13 +545,15 @@ class ClaudeConsoleRelayService {
         error.message
       )
 
-      // 🔥 熔断器：记录失败（请求异常）
-      await this._checkAndTriggerCircuitBreaker(
-        accountId,
-        false,
-        account?.name,
-        error.response?.data || error.message
-      )
+      // 🔥 熔断器：记录失败（请求异常，count_tokens 请求跳过统计）
+      if (!options.customPath?.includes('count_tokens')) {
+        await this._checkAndTriggerCircuitBreaker(
+          accountId,
+          false,
+          account?.name,
+          error.response?.data || error.message
+        )
+      }
 
       // 不再因为模型不支持而block账号
 
@@ -938,13 +945,15 @@ class ClaudeConsoleRelayService {
                 }
               }
 
-              // 🔥 熔断器：记录失败（流式错误响应）
-              await self._checkAndTriggerCircuitBreaker(
-                accountId,
-                false,
-                account?.name,
-                errorDataForCheck
-              )
+              // 🔥 熔断器：记录失败（流式错误响应，count_tokens 请求跳过统计）
+              if (!requestOptions.customPath?.includes('count_tokens')) {
+                await self._checkAndTriggerCircuitBreaker(
+                  accountId,
+                  false,
+                  account?.name,
+                  errorDataForCheck
+                )
+              }
 
               resolve() // 不抛出异常，正常完成流处理
             })
@@ -1266,8 +1275,10 @@ class ClaudeConsoleRelayService {
                 responseStream.end()
               }
 
-              // 🔥 熔断器：记录成功（流式成功完成）
-              await self._checkAndTriggerCircuitBreaker(accountId, true, account?.name)
+              // 🔥 熔断器：记录成功（流式成功完成，count_tokens 请求跳过统计）
+              if (!requestOptions.customPath?.includes('count_tokens')) {
+                await self._checkAndTriggerCircuitBreaker(accountId, true, account?.name)
+              }
 
               logger.debug('🌊 Claude Console Claude stream response completed')
               resolve()
@@ -1301,13 +1312,15 @@ class ClaudeConsoleRelayService {
               responseStream.end()
             }
 
-            // 🔥 熔断器：记录失败（流式传输错误）
-            await self._checkAndTriggerCircuitBreaker(
-              accountId,
-              false,
-              account?.name,
-              error.message
-            )
+            // 🔥 熔断器：记录失败（流式传输错误，count_tokens 请求跳过统计）
+            if (!requestOptions.customPath?.includes('count_tokens')) {
+              await self._checkAndTriggerCircuitBreaker(
+                accountId,
+                false,
+                account?.name,
+                error.message
+              )
+            }
 
             reject(error)
           })
@@ -1355,13 +1368,15 @@ class ClaudeConsoleRelayService {
             }
           }
 
-          // 🔥 熔断器：记录失败（axios catch 捕获的请求错误）
-          await self._checkAndTriggerCircuitBreaker(
-            accountId,
-            false,
-            account?.name,
-            error.response?.data || error.message
-          )
+          // 🔥 熔断器：记录失败（axios catch 捕获的请求错误，count_tokens 请求跳过统计）
+          if (!requestOptions.customPath?.includes('count_tokens')) {
+            await self._checkAndTriggerCircuitBreaker(
+              accountId,
+              false,
+              account?.name,
+              error.response?.data || error.message
+            )
+          }
 
           // 发送错误响应
           if (!responseStream.headersSent) {
