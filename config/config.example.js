@@ -230,6 +230,15 @@ const config = {
       redisPrefix: process.env.CODE_STATS_REDIS_PREFIX || 'code_stats:',
       webPath: process.env.CODE_STATS_WEB_PATH || '/admin/code-statistics'
     }
+  },
+
+  // 📬 用户消息队列配置
+  // 优化说明：锁在请求发送成功后立即释放（而非请求完成后），因为 Claude API 限流基于请求发送时刻计算
+  userMessageQueue: {
+    enabled: process.env.USER_MESSAGE_QUEUE_ENABLED === 'true', // 默认关闭
+    delayMs: parseInt(process.env.USER_MESSAGE_QUEUE_DELAY_MS) || 200, // 请求间隔（毫秒）
+    timeoutMs: parseInt(process.env.USER_MESSAGE_QUEUE_TIMEOUT_MS) || 5000, // 队列等待超时（毫秒），锁持有时间短，无需长等待
+    lockTtlMs: parseInt(process.env.USER_MESSAGE_QUEUE_LOCK_TTL_MS) || 5000 // 锁TTL（毫秒），5秒足以覆盖请求发送
   }
 }
 
