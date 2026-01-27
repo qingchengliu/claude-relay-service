@@ -1222,6 +1222,21 @@ class ClaudeRelayService {
                 logger.error('❌ Failed to decompress deflate response:', unzipError)
                 responseBody = responseData.toString('utf8')
               }
+            } else if (contentEncoding === 'br') {
+              try {
+                responseBody = zlib.brotliDecompressSync(responseData).toString('utf8')
+              } catch (unzipError) {
+                logger.error('❌ Failed to decompress brotli response:', unzipError)
+                responseBody = responseData.toString('utf8')
+              }
+            } else if (contentEncoding === 'zstd') {
+              try {
+                const fzstd = require('fzstd')
+                responseBody = fzstd.decompress(responseData).toString('utf8')
+              } catch (unzipError) {
+                logger.error('❌ Failed to decompress zstd response (fzstd not installed?):', unzipError)
+                responseBody = responseData.toString('utf8')
+              }
             } else {
               responseBody = responseData.toString('utf8')
             }
