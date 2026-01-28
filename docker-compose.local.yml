@@ -2,6 +2,18 @@
 # 从源码构建，无需依赖外部镜像
 
 services:
+  # 🌐 DNS 缓存服务
+  dns-cache:
+    image: andyshinn/dnsmasq:2.83
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    command: --cache-size=10000 --log-queries
+    volumes:
+      - /etc/resolv.conf:/etc/resolv.conf:ro
+    networks:
+      - claude-relay-network
+
   # 🚀 Claude Relay Service (从源码构建)
   claude-relay:
     build:
@@ -30,6 +42,10 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+      dns-cache:
+        condition: service_started
+    dns:
+      - dns-cache
     networks:
       - claude-relay-network
     healthcheck:
