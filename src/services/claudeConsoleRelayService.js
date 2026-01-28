@@ -29,8 +29,7 @@ class ClaudeConsoleRelayService {
       '负载过高',
       '限流',
       '没有可用',
-      'Forbidden',
-      'ValidationException'
+      'Forbidden'
     ]
   }
 
