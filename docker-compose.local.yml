@@ -12,7 +12,8 @@ services:
     volumes:
       - /etc/resolv.conf:/etc/resolv.conf:ro
     networks:
-      - claude-relay-network
+      claude-relay-network:
+        ipv4_address: 172.20.0.2
 
   # 🚀 Claude Relay Service (从源码构建)
   claude-relay:
@@ -45,7 +46,7 @@ services:
       dns-cache:
         condition: service_started
     dns:
-      - dns-cache
+      - 172.20.0.2
     networks:
       - claude-relay-network
     healthcheck:
@@ -139,3 +140,6 @@ services:
 networks:
   claude-relay-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
