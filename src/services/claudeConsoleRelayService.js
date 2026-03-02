@@ -24,7 +24,6 @@ class ClaudeConsoleRelayService {
     // 统一的限流关键词列表
     this.rateLimitKeywords = [
       'unavailable',
-      'bad respon',
       '服务失败',
       '负载过高',
       '限流',
