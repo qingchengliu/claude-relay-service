@@ -44,7 +44,8 @@ class CodexCliValidator {
       // - codex_cli_rs/0.38.0 (Ubuntu 22.4.0; x86_64) WindowsTerminal
       // - codex_exec/0.38.0 (Ubuntu 22.4.0; x86_64) WindowsTerminal
       // - Codex Desktop/0.107.0 (Mac OS 26.3.0; arm64) unknown (Codex Desktop; 26.303.1606)
-      const codexCliPattern = /^(codex_vscode|codex_cli_rs|codex_exec|Codex Desktop)\/[\d.]+/i
+      // - codex-tui/0.1.0 (...)
+      const codexCliPattern = /^(codex_vscode|codex_cli_rs|codex_exec|codex-tui|Codex Desktop)\/[\d.]+/i
       const uaMatch = userAgent.match(codexCliPattern)
 
       if (!uaMatch) {
@@ -77,6 +78,7 @@ class CodexCliValidator {
         codex_vscode: 'codex_vscode',
         codex_cli_rs: 'codex_cli_rs',
         codex_exec: 'codex_exec',
+        'codex-tui': 'codex-tui',
         'codex desktop': 'codex_desktop'
       }
 
