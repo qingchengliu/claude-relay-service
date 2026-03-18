@@ -302,6 +302,49 @@ function extractAccountUuid(account) {
   return extUuid || null
 }
 
+function _rewriteJsonUserId(body, metadata, userId, accountId, accountUuid) {
+  let parsed
+  try {
+    parsed = JSON.parse(userId)
+  } catch {
+    return { nextBody: body, changed: false }
+  }
+
+  if (!parsed || typeof parsed.session_id !== 'string') {
+    return { nextBody: body, changed: false }
+  }
+
+  const seedTail = parsed.session_id || 'default'
+  const effectiveScheduler = accountId ? String(accountId) : 'unknown-scheduler'
+  const hashed = formatUuidFromSeed(`${effectiveScheduler}::${seedTail}`)
+
+  const newObj = { ...parsed }
+  newObj.session_id = hashed
+
+  if (accountUuid) {
+    const trimmedUuid = normalizeAccountUuid(accountUuid)
+    if (trimmedUuid) {
+      newObj.account_uuid = trimmedUuid
+    }
+  }
+
+  const nextUserId = JSON.stringify(newObj)
+
+  if (nextUserId === userId) {
+    return { nextBody: body, changed: false }
+  }
+
+  const nextBody = {
+    ...body,
+    metadata: {
+      ...metadata,
+      user_id: nextUserId
+    }
+  }
+
+  return { nextBody, changed: true }
+}
+
 function rewriteUserId(body, accountId, accountUuid) {
   if (!body || typeof body !== 'object') {
     return { nextBody: body, changed: false }
@@ -315,6 +358,11 @@ function rewriteUserId(body, accountId, accountUuid) {
   const userId = metadata.user_id
   if (typeof userId !== 'string') {
     return { nextBody: body, changed: false }
+  }
+
+  // JSON 格式快速路径（新版 Claude CLI 2.1.78+）
+  if (userId.charAt(0) === '{') {
+    return _rewriteJsonUserId(body, metadata, userId, accountId, accountUuid)
   }
 
   const pivot = userId.lastIndexOf(SESSION_PREFIX)

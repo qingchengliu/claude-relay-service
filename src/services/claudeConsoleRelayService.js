@@ -14,6 +14,7 @@ const { createClaudeConsoleCircuitBreaker } = require('../utils/circuitBreakerHe
 const userMessageQueueService = require('./userMessageQueueService')
 const { isStreamWritable } = require('../utils/streamHelper')
 const { filterForClaude } = require('../utils/headerFilter')
+const { replaceDeviceId, extractSessionId, replaceSessionId } = require('../utils/userIdHelper')
 
 // 🔒 本地内存缓存：固定每日 session_id
 const fixedSessionLocalCache = new Map()
@@ -303,9 +304,9 @@ class ClaudeConsoleRelayService {
       ) {
         const uid = modifiedRequestBody?.metadata?.user_id
         if (uid) {
-          const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
-          if (m && m[1]) {
-            modifiedRequestBody.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+          const replaced = replaceDeviceId(uid, config.claudeConsole.unifiedClientId)
+          if (replaced) {
+            modifiedRequestBody.metadata.user_id = replaced
             logger.info(
               `🔄 Replaced client ID with unified ID: ${modifiedRequestBody.metadata.user_id}`
             )
@@ -962,9 +963,9 @@ class ClaudeConsoleRelayService {
     ) {
       const uid = body?.metadata?.user_id
       if (uid) {
-        const m = uid.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
-        if (m && m[1]) {
-          body.metadata.user_id = `user_${config.claudeConsole.unifiedClientId}${m[1]}`
+        const replaced = replaceDeviceId(uid, config.claudeConsole.unifiedClientId)
+        if (replaced) {
+          body.metadata.user_id = replaced
           logger.info(`🔄 Replaced client ID with unified ID: ${body.metadata.user_id}`)
         }
       }
@@ -1882,7 +1883,7 @@ class ClaudeConsoleRelayService {
 
       // 3. 从 metadata.user_id 提取客户端传入的 session_id
       const userId = body.metadata.user_id
-      const clientSessionId = userId.match(/session_([a-f0-9-]{36})/)?.[1]
+      const clientSessionId = extractSessionId(userId)
       if (!clientSessionId) {
         return
       }
@@ -1908,7 +1909,10 @@ class ClaudeConsoleRelayService {
 
       // 7. 替换 session_id
       if (clientSessionId !== fixedSessionId) {
-        body.metadata.user_id = userId.replace(/session_[a-f0-9-]{36}/, `session_${fixedSessionId}`)
+        const replacedUserId = replaceSessionId(userId, fixedSessionId)
+        if (replacedUserId) {
+          body.metadata.user_id = replacedUserId
+        }
       }
     } catch (error) {
       logger.error(`❌ [FixedSession] Error for ${accountId}:`, error.message)

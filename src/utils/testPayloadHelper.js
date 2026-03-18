@@ -20,6 +20,16 @@ function generateSessionString() {
 }
 
 /**
+ * 生成新版 Claude Code 风格的 JSON 会话字符串
+ * @returns {string} JSON格式的会话字符串
+ */
+function generateSessionJson() {
+  const hex64 = randomHex(32)
+  const uuid = crypto.randomUUID()
+  return JSON.stringify({ device_id: hex64, account_uuid: '', session_id: uuid })
+}
+
+/**
  * 生成 Claude 测试请求体
  * @param {string} model - 模型名称
  * @param {object} options - 可选配置
@@ -237,6 +247,7 @@ async function sendStreamTestRequest(options) {
 module.exports = {
   randomHex,
   generateSessionString,
+  generateSessionJson,
   createClaudeTestPayload,
   sendStreamTestRequest
 }

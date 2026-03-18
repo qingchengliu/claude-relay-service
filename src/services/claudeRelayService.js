@@ -17,6 +17,7 @@ const requestIdentityService = require('./requestIdentityService')
 const { createClaudeTestPayload } = require('../utils/testPayloadHelper')
 const userMessageQueueService = require('./userMessageQueueService')
 const { isStreamWritable } = require('../utils/streamHelper')
+const { replaceDeviceId } = require('../utils/userIdHelper')
 
 class ClaudeRelayService {
   constructor() {
@@ -797,13 +798,9 @@ class ClaudeRelayService {
       return
     }
 
-    const userId = body.metadata.user_id
-    // user_id格式：user_{64位十六进制}_account__session_{uuid}
-    // 只替换第一个下划线后到_account之前的部分（客户端标识）
-    const match = userId.match(/^user_[a-f0-9]{64}(_account__session_[a-f0-9-]{36})$/)
-    if (match && match[1]) {
-      // 替换客户端标识部分
-      body.metadata.user_id = `user_${unifiedClientId}${match[1]}`
+    const replaced = replaceDeviceId(body.metadata.user_id, unifiedClientId)
+    if (replaced) {
+      body.metadata.user_id = replaced
       logger.info(`🔄 Replaced client ID with unified ID: ${body.metadata.user_id}`)
     }
   }
@@ -1234,7 +1231,10 @@ class ClaudeRelayService {
                 const fzstd = require('fzstd')
                 responseBody = fzstd.decompress(responseData).toString('utf8')
               } catch (unzipError) {
-                logger.error('❌ Failed to decompress zstd response (fzstd not installed?):', unzipError)
+                logger.error(
+                  '❌ Failed to decompress zstd response (fzstd not installed?):',
+                  unzipError
+                )
                 responseBody = responseData.toString('utf8')
               }
             } else {
