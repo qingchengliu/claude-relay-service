@@ -41,47 +41,62 @@ class OpenAIResponsesRelayService {
     this.defaultTimeout = config.requestTimeout || 600000
   }
 
-  // 统一 UA：捕获并返回统一的 Codex CLI User-Agent（按日缓存，仅 Windows UA）
+  // 识别 Codex UA 类型并提取版本号
+  // 返回 { type: 'cli'|'desktop', version: string } 或 null
+  _parseCodexUA(ua) {
+    if (!ua) {
+      return null
+    }
+    // codex_cli_rs/0.110.0 (Windows 10.0.19044; x86_64) WindowsTerminal
+    const cliMatch = ua.match(/^codex_cli_rs\/([\d.]+)/i)
+    if (cliMatch) {
+      return { type: 'cli', version: cliMatch[1] }
+    }
+    // Codex Desktop/0.108.0-alpha.12 (Mac OS 26.3.1; arm64) unknown (Codex Desktop; 26.305.950)
+    const desktopMatch = ua.match(/^Codex Desktop\/([\d.]+)/i)
+    if (desktopMatch) {
+      return { type: 'desktop', version: desktopMatch[1] }
+    }
+    return null
+  }
+
+  // 统一 UA：按 Codex 客户端类型分别捕获最大版本号（按日缓存）
   async _captureAndGetUnifiedCodexUserAgent(clientHeaders) {
     if (!config?.openaiResponses?.useUnifiedUserAgent) {
       return null
     }
 
-    const CACHE_KEY = 'openai_responses_user_agent:daily'
     const TTL = 90000 // 25小时
     const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
-    // 匹配 codex_cli_rs/x.x.x ... Windows ...
-    const isCodexWindowsUA = clientUA && /^codex_cli_rs\/[\d.]+\s+\(.*Windows/i.test(clientUA)
+    const parsed = this._parseCodexUA(clientUA)
+
+    if (!parsed) {
+      // 非 Codex UA，不处理
+      return null
+    }
+
+    // 按类型分别缓存：cli 和 desktop 各自独立
+    const CACHE_KEY = `openai_responses_user_agent:${parsed.type}:daily`
 
     let cachedUA = await redis.client.get(CACHE_KEY)
 
-    if (isCodexWindowsUA) {
-      if (!cachedUA) {
+    if (!cachedUA) {
+      await redis.client.setex(CACHE_KEY, TTL, clientUA)
+      cachedUA = clientUA
+      logger.info(`Captured unified Codex ${parsed.type} UA: ${clientUA}`)
+    } else {
+      const oldParsed = this._parseCodexUA(cachedUA)
+      const oldVer = oldParsed ? oldParsed.version : null
+      if (!oldVer || this._compareSemanticVersions(parsed.version, oldVer) > 0) {
         await redis.client.setex(CACHE_KEY, TTL, clientUA)
+        logger.info(`Updated Codex ${parsed.type} unified UA: ${clientUA} (was: ${cachedUA})`)
         cachedUA = clientUA
-        logger.info(`Captured unified Codex UA: ${clientUA}`)
       } else {
-        const newVer = this._extractCodexCliVersion(clientUA)
-        const oldVer = this._extractCodexCliVersion(cachedUA)
-        if (!newVer || !oldVer || this._compareSemanticVersions(newVer, oldVer) > 0) {
-          await redis.client.setex(CACHE_KEY, TTL, clientUA)
-          logger.info(`Updated Codex unified UA: ${clientUA} (was: ${cachedUA})`)
-          cachedUA = clientUA
-        } else {
-          await redis.client.expire(CACHE_KEY, TTL)
-        }
+        await redis.client.expire(CACHE_KEY, TTL)
       }
     }
 
-    return cachedUA || null
-  }
-
-  _extractCodexCliVersion(ua) {
-    if (!ua) {
-      return null
-    }
-    const m = ua.match(/codex_cli_rs\/([\d.]+)/i)
-    return m ? m[1] : null
+    return cachedUA
   }
 
   _compareSemanticVersions(v1, v2) {
