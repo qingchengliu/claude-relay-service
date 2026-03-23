@@ -372,8 +372,8 @@ class ClaudeConsoleRelayService {
         headers: {
           'Content-Type': 'application/json',
           'anthropic-version': '2023-06-01',
-          'User-Agent': userAgent,
-          ...filteredHeaders
+          ...filteredHeaders,
+          'User-Agent': userAgent
         },
         timeout: config.requestTimeout || 600000,
         signal: abortController.signal,
@@ -999,8 +999,8 @@ class ClaudeConsoleRelayService {
         headers: {
           'Content-Type': 'application/json',
           'anthropic-version': '2023-06-01',
-          'User-Agent': userAgent,
-          ...filteredHeaders
+          ...filteredHeaders,
+          'User-Agent': userAgent
         },
         timeout: config.requestTimeout || 600000,
         responseType: 'stream',
