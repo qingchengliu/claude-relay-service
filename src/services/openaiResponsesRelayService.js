@@ -7,6 +7,7 @@ const apiKeyService = require('./apiKeyService')
 const unifiedOpenAIScheduler = require('./unifiedOpenAIScheduler')
 const config = require('../../config/config')
 const crypto = require('crypto')
+const redis = require('../models/redis')
 const { createOpenAIResponsesCircuitBreaker } = require('../utils/circuitBreakerHelper')
 
 // 抽取缓存写入 token，兼容多种字段命名
@@ -38,6 +39,79 @@ function extractCacheCreationTokens(usageData) {
 class OpenAIResponsesRelayService {
   constructor() {
     this.defaultTimeout = config.requestTimeout || 600000
+  }
+
+  // 统一 UA：捕获并返回统一的 Codex CLI User-Agent（按日缓存，仅 Windows UA）
+  async _captureAndGetUnifiedCodexUserAgent(clientHeaders) {
+    if (!config?.openaiResponses?.useUnifiedUserAgent) {
+      return null
+    }
+
+    const CACHE_KEY = 'openai_responses_user_agent:daily'
+    const TTL = 90000 // 25小时
+    const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+    // 匹配 codex_cli_rs/x.x.x ... Windows ...
+    const isCodexWindowsUA = clientUA && /^codex_cli_rs\/[\d.]+\s+\(.*Windows/i.test(clientUA)
+
+    let cachedUA = await redis.client.get(CACHE_KEY)
+
+    if (isCodexWindowsUA) {
+      if (!cachedUA) {
+        await redis.client.setex(CACHE_KEY, TTL, clientUA)
+        cachedUA = clientUA
+        logger.info(`Captured unified Codex UA: ${clientUA}`)
+      } else {
+        const newVer = this._extractCodexCliVersion(clientUA)
+        const oldVer = this._extractCodexCliVersion(cachedUA)
+        if (!newVer || !oldVer || this._compareSemanticVersions(newVer, oldVer) > 0) {
+          await redis.client.setex(CACHE_KEY, TTL, clientUA)
+          logger.info(`Updated Codex unified UA: ${clientUA} (was: ${cachedUA})`)
+          cachedUA = clientUA
+        } else {
+          await redis.client.expire(CACHE_KEY, TTL)
+        }
+      }
+    }
+
+    return cachedUA || null
+  }
+
+  _extractCodexCliVersion(ua) {
+    if (!ua) {
+      return null
+    }
+    const m = ua.match(/codex_cli_rs\/([\d.]+)/i)
+    return m ? m[1] : null
+  }
+
+  _compareSemanticVersions(v1, v2) {
+    if (!v1 || !v2) {
+      return 0
+    }
+    const a = v1.split('.').map((x) => parseInt(x, 10) || 0)
+    const b = v2.split('.').map((x) => parseInt(x, 10) || 0)
+    const n = Math.max(a.length, b.length)
+    for (let i = 0; i < n; i++) {
+      const d = (a[i] || 0) - (b[i] || 0)
+      if (d !== 0) {
+        return d > 0 ? 1 : -1
+      }
+    }
+    return 0
+  }
+
+  // 选择最终 User-Agent：统一UA > 账户UA > 客户端UA
+  async _selectUserAgent(clientHeaders, account) {
+    if (config?.openaiResponses?.useUnifiedUserAgent) {
+      const unifiedUA = await this._captureAndGetUnifiedCodexUserAgent(clientHeaders)
+      const clientUA = clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent']
+      const selectedUA = unifiedUA || account.userAgent || clientUA
+      logger.debug(`Selected Codex UA: ${selectedUA}`)
+      return selectedUA || null
+    }
+    return (
+      account.userAgent || clientHeaders?.['user-agent'] || clientHeaders?.['User-Agent'] || null
+    )
   }
 
   /**
@@ -90,21 +164,16 @@ class OpenAIResponsesRelayService {
       logger.info(`🎯 Forwarding to: ${targetUrl}`)
 
       // 构建请求头 - 使用统一的 headerFilter 移除 CDN headers
-      const headers = {
-        ...filterForOpenAI(req.headers),
-        Authorization: `Bearer ${fullAccount.apiKey}`,
-        'Content-Type': 'application/json'
-      }
+      const filteredHeaders = filterForOpenAI(req.headers)
 
-      // 处理 User-Agent
-      if (fullAccount.userAgent) {
-        // 使用自定义 User-Agent
-        headers['User-Agent'] = fullAccount.userAgent
-        logger.debug(`📱 Using custom User-Agent: ${fullAccount.userAgent}`)
-      } else if (req.headers['user-agent']) {
-        // 透传原始 User-Agent
-        headers['User-Agent'] = req.headers['user-agent']
-        logger.debug(`📱 Forwarding original User-Agent: ${req.headers['user-agent']}`)
+      // 处理 User-Agent：统一UA > 账户UA > 客户端UA
+      const userAgent = await this._selectUserAgent(req.headers, fullAccount)
+
+      const headers = {
+        ...filteredHeaders,
+        Authorization: `Bearer ${fullAccount.apiKey}`,
+        'Content-Type': 'application/json',
+        ...(userAgent ? { 'User-Agent': userAgent } : {})
       }
 
       // 配置请求选项

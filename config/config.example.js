@@ -73,6 +73,14 @@ const config = {
     useUnifiedUserAgent: process.env.CLAUDE_CONSOLE_USE_UNIFIED_USER_AGENT === 'true' || false
   },
 
+  // 🤖 OpenAI Responses Relay 配置
+  openaiResponses: {
+    // 是否启用"统一 Codex CLI 版本"（统一 User-Agent）。
+    // 按日捕获最新的含 Windows 的 codex_cli_rs UA；若未捕获则回退到账户UA或客户端UA。
+    // 开启：OPENAI_RESPONSES_USE_UNIFIED_USER_AGENT=true
+    useUnifiedUserAgent: process.env.OPENAI_RESPONSES_USE_UNIFIED_USER_AGENT === 'true' || false
+  },
+
   // ☁️ Bedrock API配置
   bedrock: {
     enabled: process.env.CLAUDE_CODE_USE_BEDROCK === '1',
