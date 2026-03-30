@@ -49,7 +49,7 @@ class OpenAIResponsesAccountService {
       schedulable = true, // 是否可被调度
       dailyQuota = 0, // 每日额度限制（美元），0表示不限制
       quotaResetTime = '00:00', // 额度重置时间（HH:mm格式）
-      rateLimitDuration = 60 // 限流时间（分钟）
+      rateLimitDuration = 1 // 限流时间（分钟）
     } = options
 
     // 验证必填字段
@@ -293,7 +293,7 @@ class OpenAIResponsesAccountService {
       return
     }
 
-    const rateLimitDuration = duration || parseInt(account.rateLimitDuration) || 60
+    const rateLimitDuration = duration || parseInt(account.rateLimitDuration) || 1
     const now = new Date()
     const resetAt = new Date(now.getTime() + rateLimitDuration * 60000)
 
@@ -371,7 +371,7 @@ class OpenAIResponsesAccountService {
     } else {
       // 如果没有 rateLimitResetAt，使用旧的逻辑
       const rateLimitedAt = new Date(account.rateLimitedAt)
-      const rateLimitDuration = parseInt(account.rateLimitDuration) || 60
+      const rateLimitDuration = parseInt(account.rateLimitDuration) || 1
       shouldClear = now - rateLimitedAt > rateLimitDuration * 60000
     }
 
@@ -559,7 +559,7 @@ class OpenAIResponsesAccountService {
     } else {
       // 如果没有 rateLimitResetAt，使用旧的逻辑
       const rateLimitedAt = new Date(accountData.rateLimitedAt)
-      const rateLimitDuration = parseInt(accountData.rateLimitDuration) || 60
+      const rateLimitDuration = parseInt(accountData.rateLimitDuration) || 1
       const elapsedMinutes = Math.floor((now - rateLimitedAt) / 60000)
       remainingMinutes = Math.max(0, rateLimitDuration - elapsedMinutes)
       willBeAvailableAt = new Date(rateLimitedAt.getTime() + rateLimitDuration * 60000)
