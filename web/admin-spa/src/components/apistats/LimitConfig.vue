@@ -380,37 +380,8 @@ const canRequestQuota = computed(() => {
   return usagePercentage >= 95 && dailyCostLimit < 200
 })
 
-const handleRequestQuota = async () => {
-  const currentLimit = statsData.value?.limits?.dailyCostLimit || 0
-  const newLimit = Math.min(currentLimit + 50, 200)
-  const willReachCap = newLimit >= 200
-
-  // 使用确认对话框而不是输入 API Key
-  const confirmed = confirm(
-    `确认申请增加额度？\n\n` +
-      `当日费用限额将从 $${currentLimit.toFixed(2)} 增加到 $${newLimit.toFixed(2)}` +
-      (willReachCap ? '（达到上限）' : '') +
-      `\n限额将在次日 00:00 自动重置为原值`
-  )
-
-  if (!confirmed) {
-    return
-  }
-
-  try {
-    // 使用 store 中的 apiId
-    const result = await apiStatsStore.requestQuotaIncrease({})
-    if (result.success) {
-      alert(
-        `✅ 额度申请成功！\n\n` +
-          `原限额: $${result.data.previousLimit}\n` +
-          `新限额: $${result.data.newLimit}\n` +
-          `增加金额: $${result.data.increasedAmount}`
-      )
-    }
-  } catch (err) {
-    alert(`❌ 申请失败：${err.message || '未知错误'}`)
-  }
+const handleRequestQuota = () => {
+  alert('续费已关闭，请使用乐效API')
 }
 
 // 获取每日费用进度

@@ -1064,8 +1064,18 @@ router.post('/api/user-model-stats', async (req, res) => {
 // 💰 额度申请接口 - 增加当日费用限额
 router.post('/api/request-quota-increase', async (req, res) => {
   const clientIP = req.ip || req.connection?.remoteAddress || 'unknown'
+  const quotaIncreaseEnabled = false
 
   try {
+    if (!quotaIncreaseEnabled) {
+      logger.security(`🔒 Quota increase disabled from ${clientIP}`)
+      return res.status(403).json({
+        success: false,
+        error: 'quota_increase_disabled',
+        message: '续费已关闭，请使用乐效API'
+      })
+    }
+
     const { apiKey, apiId } = req.body || {}
 
     let keyData = null
