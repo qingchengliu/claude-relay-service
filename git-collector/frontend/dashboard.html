@@ -1264,8 +1264,10 @@ function populateMemberSelectors(){
 /* ─── User detail modal ────────────────────────────────────── */
 async function showUser(id){
   try {
-    const d = await api('/api/stats/user-detail/' + id);
+    const days = $('globalDays') ? $('globalDays').value : 0;
+    const d = await api('/api/stats/user-detail/' + id + '?days=' + days);
     const acc = d.ai_code_pct || d.ai_pct || 0;
+    const agentModels = d.agent_model_breakdown || [];
     $('modalCard').innerHTML =
       '<div class="modal-head"><div class="who"><div class="avatar" style="background:' + avatarColor(d.name) + '">' + initials(d.name) + '</div>'
       + '<h2>' + esc(d.name) + '<small>' + esc(d.email || d.distinct_id || '') + '</small></h2></div>'
@@ -1286,9 +1288,18 @@ async function showUser(id){
       + miniRow('辅助频率' + helpTip('个人提交数 / 团队提交数 * 100%'), d.contribution.sub_scores.frequency, 100)
       + miniRow('活跃度' + helpTip('min(checkpoints / 活跃天数 / 20, 1) * 100%'), d.contribution.sub_scores.activity, 100)
       + '</div></div>'
-      + '<div class="card"><div class="card-head"><div class="ttl">高频文件 Top 10</div></div><div class="card-body flush"><div class="t-wrap"><table>'
-      + '<thead><tr><th>文件</th><th>编辑</th><th>新增行</th></tr></thead><tbody>'
-      + ((d.file_breakdown || []).map(f => '<tr><td style="font-family:JetBrains Mono;font-size:11px;color:var(--ink-2)">' + esc(f.file) + '</td><td class="tabular">' + f.edits + '</td><td class="tabular">' + f.lines_added + '</td></tr>').join('') || '<tr><td colspan="3" class="empty">无</td></tr>')
+      + '<div class="card"><div class="card-head"><div class="ttl">Agent × 模型 AI 代码行 <span>提交到 git 中</span></div></div><div class="card-body flush"><div class="t-wrap"><table>'
+      + '<thead><tr><th>Agent</th><th>模型</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th><th>转化率</th><th>混合行</th><th>提交</th></tr></thead><tbody>'
+      + (agentModels.map(x => '<tr>'
+        + '<td><b>' + esc(x.agent || 'unknown') + '</b></td>'
+        + '<td>' + esc(x.model || 'unknown') + '</td>'
+        + '<td class="tabular">' + fmt(x.ai_code_lines || 0) + '</td>'
+        + '<td class="tabular">' + fmt(x.total_added_lines || 0) + '</td>'
+        + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(x.ai_code_pct || 0, 100) + '%"></i></div><span class="num">' + pct(x.ai_code_pct || 0) + '</span></div></td>'
+        + '<td class="tabular">' + pct(x.conversion_pct || 0) + '</td>'
+        + '<td class="tabular">' + fmt(x.mixed_added_lines || 0) + ' / ' + pct(x.mixed_pct || 0) + '</td>'
+        + '<td class="tabular">' + (x.commits || 0) + '</td>'
+        + '</tr>').join('') || '<tr><td colspan="8" class="empty">暂无 Agent × 模型代码数据</td></tr>')
       + '</tbody></table></div></div></div>'
       + '</div></div>';
     $('modal').classList.add('show');

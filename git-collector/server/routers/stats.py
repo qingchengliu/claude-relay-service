@@ -355,8 +355,8 @@ async def user_detail(
     since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
     detail = await _build_user_detail(db, member, since)
     detail["daily"] = await _build_user_daily(db, member.id)
-    detail["model_breakdown"] = await _build_user_models(db, member.id)
-    detail["file_breakdown"] = await _build_user_files(db, member.id)
+    detail["model_breakdown"] = await _build_user_models(db, member.id, since)
+    detail["agent_model_breakdown"] = await _build_user_agent_models(db, member.id, since)
     return detail
 
 
@@ -478,10 +478,10 @@ async def _build_user_daily(db: AsyncSession, member_id: str) -> list[dict]:
     return [{"date": r[0], "events": r[1], "commits": r[2], "edits": r[3]} for r in result.all()]
 
 
-async def _build_user_models(db: AsyncSession, member_id: str) -> list[dict]:
-    result = await db.execute(
-        select(MetricEvent.event_data).where(MetricEvent.member_id == member_id, MetricEvent.event_type == 1)
-    )
+async def _build_user_models(db: AsyncSession, member_id: str, since: datetime | None = None) -> list[dict]:
+    conds = [MetricEvent.member_id == member_id, MetricEvent.event_type == 1]
+    if since: conds.append(MetricEvent.created_at >= since)
+    result = await db.execute(select(MetricEvent.event_data).where(*conds))
     models: dict[str, dict] = {}
     for (evt_data,) in result.all():
         if not isinstance(evt_data, dict):
@@ -495,6 +495,48 @@ async def _build_user_models(db: AsyncSession, member_id: str) -> list[dict]:
             row["count"] += 1
             row["ai_code_lines"] += _metric_at(evt_data.get("ai_additions"), i)
     return sorted(models.values(), key=lambda x: (x["ai_code_lines"], x["count"]), reverse=True)[:10]
+
+
+async def _build_user_agent_models(db: AsyncSession, member_id: str, since: datetime | None = None) -> list[dict]:
+    conds = [MetricEvent.member_id == member_id, MetricEvent.event_type == 1]
+    if since: conds.append(MetricEvent.created_at >= since)
+    result = await db.execute(select(MetricEvent.event_data).where(*conds))
+
+    rows: dict[tuple[str, str], dict] = {}
+    for (evt_data,) in result.all():
+        if not isinstance(evt_data, dict):
+            continue
+        total_added = _commit_metrics(evt_data)["total_added"]
+        pairs = evt_data.get("tool_model_pairs")
+        if not isinstance(pairs, list) or len(pairs) <= 1:
+            continue
+        for i, pair in enumerate(pairs[1:], start=1):
+            agent, model = _split_tool_model(pair)
+            key = (agent, model)
+            row = rows.setdefault(key, {
+                "agent": agent, "model": model, "commits": 0,
+                "total_added_lines": 0, "ai_code_lines": 0, "ai_accepted_lines": 0,
+                "mixed_added_lines": 0, "ai_generated_lines": 0, "ai_deleted_lines": 0,
+            })
+            row["commits"] += 1
+            row["total_added_lines"] += total_added
+            row["ai_code_lines"] += _metric_at(evt_data.get("ai_additions"), i)
+            row["ai_accepted_lines"] += _metric_at(evt_data.get("ai_accepted"), i)
+            row["mixed_added_lines"] += _metric_at(evt_data.get("mixed_additions"), i)
+            row["ai_generated_lines"] += _metric_at(evt_data.get("total_ai_additions"), i)
+            row["ai_deleted_lines"] += _metric_at(evt_data.get("total_ai_deletions"), i)
+
+    pivot = []
+    for row in rows.values():
+        total_added = row["total_added_lines"]
+        ai_code = row["ai_code_lines"]
+        generated = row["ai_generated_lines"]
+        row["ai_code_pct"] = min(100, round(ai_code / total_added * 100, 1)) if total_added > 0 else 0
+        row["conversion_pct"] = round(ai_code / generated * 100, 1) if generated > 0 else 0
+        row["mixed_pct"] = round(row["mixed_added_lines"] / ai_code * 100, 1) if ai_code > 0 else 0
+        pivot.append(row)
+
+    return sorted(pivot, key=lambda x: (x["ai_code_lines"], x["ai_code_pct"], x["commits"]), reverse=True)[:30]
 
 
 async def _build_user_files(db: AsyncSession, member_id: str) -> list[dict]:
