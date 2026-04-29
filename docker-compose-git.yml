@@ -1,6 +1,11 @@
 services:
   git-collector:
-    build: ./git-collector
+    build:
+      context: ./git-collector
+      args:
+        PYTHON_IMAGE: ${GIT_COLLECTOR_PYTHON_IMAGE:-docker.m.daocloud.io/library/python:3.12-slim}
+        PIP_INDEX_URL: ${GIT_COLLECTOR_PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}
+        PIP_TRUSTED_HOST: ${GIT_COLLECTOR_PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}
     container_name: ragent-git-collector
     ports:
       - "${GIT_AI_PORT:-8000}:8000"
