@@ -479,14 +479,22 @@ async def _build_user_daily(db: AsyncSession, member_id: str) -> list[dict]:
 
 
 async def _build_user_models(db: AsyncSession, member_id: str) -> list[dict]:
-    query = text("""
-        SELECT json_extract(event_data, '$.model') as m, COUNT(*) as c
-        FROM metric_events WHERE member_id = :mid
-          AND json_extract(event_data, '$.model') IS NOT NULL AND json_extract(event_data, '$.model') != ''
-        GROUP BY m ORDER BY c DESC LIMIT 10
-    """)
-    result = await db.execute(query, {"mid": member_id})
-    return [{"model": r[0] or "unknown", "count": r[1]} for r in result.all()]
+    result = await db.execute(
+        select(MetricEvent.event_data).where(MetricEvent.member_id == member_id, MetricEvent.event_type == 1)
+    )
+    models: dict[str, dict] = {}
+    for (evt_data,) in result.all():
+        if not isinstance(evt_data, dict):
+            continue
+        pairs = evt_data.get("tool_model_pairs")
+        if not isinstance(pairs, list) or len(pairs) <= 1:
+            continue
+        for i, pair in enumerate(pairs[1:], start=1):
+            _, model = _split_tool_model(pair)
+            row = models.setdefault(model, {"model": model, "count": 0, "ai_code_lines": 0})
+            row["count"] += 1
+            row["ai_code_lines"] += _metric_at(evt_data.get("ai_additions"), i)
+    return sorted(models.values(), key=lambda x: (x["ai_code_lines"], x["count"]), reverse=True)[:10]
 
 
 async def _build_user_files(db: AsyncSession, member_id: str) -> list[dict]:
@@ -498,7 +506,22 @@ async def _build_user_files(db: AsyncSession, member_id: str) -> list[dict]:
         GROUP BY fp ORDER BY edits DESC LIMIT 10
     """)
     result = await db.execute(query, {"mid": member_id})
-    return [{"file": r[0] or "unknown", "edits": r[1], "lines_added": r[2] or 0} for r in result.all()]
+    files = [{"file": r[0] or "unknown", "edits": r[1], "lines_added": r[2] or 0} for r in result.all()]
+    if files:
+        return files
+
+    result = await db.execute(
+        select(MetricEvent.event_data).where(MetricEvent.member_id == member_id, MetricEvent.event_type == 1)
+    )
+    commits = result.all()
+    if not commits:
+        return []
+    totals = _aggregate_commits([(evt_data,) for (evt_data,) in commits])
+    return [{
+        "file": "[commit summary]",
+        "edits": len(commits),
+        "lines_added": totals["total_added"],
+    }]
 
 
 # ============================================================

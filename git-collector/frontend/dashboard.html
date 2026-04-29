@@ -1257,7 +1257,7 @@ async function showUser(id){
       }, { scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } } });
       const ms_ = d.model_breakdown || [];
       buildChart('ud_models', 'doughnut', {
-        labels: ms_.map(x => x.model), datasets: [{ data: ms_.map(x => x.count), backgroundColor: COLORS, borderWidth: 0 }]
+        labels: ms_.map(x => x.model), datasets: [{ data: ms_.map(x => x.ai_code_lines || x.count), backgroundColor: COLORS, borderWidth: 0 }]
       }, { cutout: '60%', plugins: { legend: { position: 'right' } } });
     }, 60);
   } catch(e){ toast(e.message); }
