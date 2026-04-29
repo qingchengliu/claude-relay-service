@@ -46,6 +46,20 @@ def _metric_total(value) -> int:
     return _sum_num(value)
 
 
+def _metric_at(value, index: int) -> int:
+    if isinstance(value, list):
+        return _sum_num(value[index]) if index < len(value) else 0
+    return _sum_num(value) if index == 0 else 0
+
+
+def _split_tool_model(pair: str | None) -> tuple[str, str]:
+    raw = str(pair or "unknown")
+    if "::" in raw:
+        tool, model = raw.split("::", 1)
+        return tool or "unknown", model or "unknown"
+    return raw or "unknown", "unknown"
+
+
 def _deleted_file_lines(value) -> int:
     if isinstance(value, (int, float)):
         return int(value)
@@ -639,6 +653,69 @@ async def models(db: AsyncSession = Depends(get_db), api_key: str = Header(None,
     return {"models": [
         {"name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2]} for r in result.all()
     ]}
+
+
+# ============================================================
+#  /agent-model-pivot
+# ============================================================
+@router.get("/agent-model-pivot")
+async def agent_model_pivot(
+    days: int = Query(default=0, description="0=全部, 1/7/30=筛选周期"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"rows": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"rows": []}
+
+    conds = [
+        MetricEvent.member_id.in_(member_ids),
+        MetricEvent.event_type == 1,
+    ]
+    if days > 0:
+        conds.append(MetricEvent.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
+    result = await db.execute(select(MetricEvent.member_id, MetricEvent.event_data).where(*conds))
+
+    rows: dict[tuple[str, str], dict] = {}
+    for member_id, evt_data in result.all():
+        if not isinstance(evt_data, dict):
+            continue
+        total_added = _commit_metrics(evt_data)["total_added"]
+        pairs = evt_data.get("tool_model_pairs")
+        if not isinstance(pairs, list) or len(pairs) <= 1:
+            continue
+        for i, pair in enumerate(pairs[1:], start=1):
+            agent, model = _split_tool_model(pair)
+            key = (agent, model)
+            row = rows.setdefault(key, {
+                "agent": agent, "model": model, "commits": 0, "users": set(),
+                "total_added_lines": 0, "ai_code_lines": 0, "ai_accepted_lines": 0,
+                "mixed_added_lines": 0, "ai_generated_lines": 0, "ai_deleted_lines": 0,
+            })
+            row["commits"] += 1
+            row["users"].add(member_id)
+            row["total_added_lines"] += total_added
+            row["ai_code_lines"] += _metric_at(evt_data.get("ai_additions"), i)
+            row["ai_accepted_lines"] += _metric_at(evt_data.get("ai_accepted"), i)
+            row["mixed_added_lines"] += _metric_at(evt_data.get("mixed_additions"), i)
+            row["ai_generated_lines"] += _metric_at(evt_data.get("total_ai_additions"), i)
+            row["ai_deleted_lines"] += _metric_at(evt_data.get("total_ai_deletions"), i)
+
+    pivot = []
+    for row in rows.values():
+        users = row.pop("users")
+        total_added = row["total_added_lines"]
+        ai_code = row["ai_code_lines"]
+        generated = row["ai_generated_lines"]
+        row["user_count"] = len(users)
+        row["ai_code_pct"] = min(100, round(ai_code / total_added * 100, 1)) if total_added > 0 else 0
+        row["conversion_pct"] = round(ai_code / generated * 100, 1) if generated > 0 else 0
+        row["mixed_pct"] = round(row["mixed_added_lines"] / ai_code * 100, 1) if ai_code > 0 else 0
+        pivot.append(row)
+
+    pivot.sort(key=lambda x: (x["ai_code_lines"], x["ai_code_pct"], x["commits"]), reverse=True)
+    return {"rows": pivot}
 
 
 # ============================================================

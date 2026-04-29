@@ -572,6 +572,16 @@ tbody tr.row:hover td{background:var(--surface-2)}
           <div class="card-body"><div class="minilist" id="modelList"></div></div>
         </div>
       </div>
+      <div class="card">
+        <div class="card-head"><div class="ttl">Agent × 模型 AI 代码占比 <span>按 git 提交中的 AI 采纳行透视</span><i class="tip" data-tip="AI占比=该 Agent/模型的 ai_additions / 其参与提交的 git_diff_added_lines；转化率=ai_additions / total_ai_additions">?</i></div></div>
+        <div class="card-body flush"><div class="t-wrap"><table>
+          <thead><tr>
+            <th>Agent</th><th>模型</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th>
+            <th>转化率</th><th>混合行</th><th>提交</th><th>使用人数</th>
+          </tr></thead>
+          <tbody id="agentModelBody"></tbody>
+        </table></div></div>
+      </div>
     </section>
   </main>
 </section>
@@ -764,7 +774,8 @@ async function refreshAll(){
       api('/api/stats/time-distribution?days=' + (days || 30)),
       api('/api/stats/repo-stats?days=' + days),
       api('/api/stats/weekly'),
-      api('/api/stats/language-trend?days=' + (days || 30))
+      api('/api/stats/language-trend?days=' + (days || 30)),
+      api('/api/stats/agent-model-pivot?days=' + days)
     ]);
     state.overview = arr[0]; state.ranking = arr[1].ranking || []; state.members = arr[2].members || [];
     renderBanner(arr[0], arr[6].trend || [], arr[4].models || []);
@@ -783,6 +794,7 @@ async function refreshAll(){
     renderLanguageTrend(arr[10]);
     renderAgents(arr[3]);
     renderModels(arr[4]);
+    renderAgentModelPivot(arr[11]);
     populateMemberSelectors();
     $('apiStatus').textContent = '已同步 · ' + state.members.length + ' 成员 · ' + (state.ranking.length) + ' 活跃';
     $('liveTime').textContent = new Date().toLocaleTimeString('zh-CN');
@@ -1182,6 +1194,22 @@ function renderModels(d){
       + '<div style="display:flex;align-items:center;gap:10px"><div class="bar" style="background:' + hexToRgba(COLORS[i % COLORS.length], .15) + '"><i style="width:' + (x.usage_count / max * 100) + '%;background:' + COLORS[i % COLORS.length] + '"></i></div>'
       + '<div class="num">' + fmt(x.usage_count) + '</div></div></div>';
   }).join('') : '<div class="empty">暂无模型数据</div>';
+}
+function renderAgentModelPivot(d){
+  const rows = (d.rows || []).slice(0, 30);
+  $('agentModelBody').innerHTML = rows.length ? rows.map(x => {
+    return '<tr>'
+      + '<td><b>' + esc(x.agent || 'unknown') + '</b></td>'
+      + '<td>' + esc(x.model || 'unknown') + '</td>'
+      + '<td class="tabular">' + fmt(x.ai_code_lines || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.total_added_lines || 0) + '</td>'
+      + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(x.ai_code_pct || 0, 100) + '%"></i></div><span class="num">' + pct(x.ai_code_pct || 0) + '</span></div></td>'
+      + '<td class="tabular">' + pct(x.conversion_pct || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.mixed_added_lines || 0) + ' / ' + pct(x.mixed_pct || 0) + '</td>'
+      + '<td class="tabular">' + (x.commits || 0) + '</td>'
+      + '<td class="tabular">' + (x.user_count || 0) + '</td>'
+      + '</tr>';
+  }).join('') : '<tr><td colspan="9" class="empty">暂无 Agent × 模型代码数据</td></tr>';
 }
 function populateMemberSelectors(){
   const opts = '<option value="">全员汇总</option>' + state.members.map(m => '<option value="' + m.id + '">' + esc(m.name) + '</option>').join('');
