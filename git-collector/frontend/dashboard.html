@@ -262,7 +262,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
 /* Modal */
 .modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(2,6,12,.72);backdrop-filter:blur(10px);z-index:60;padding:24px;animation:fadeIn .18s ease-out}
 .modal.show{display:grid}
-.modal-card{width:min(1080px,100%);max-height:88vh;overflow:auto;background:var(--bg-2);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow-lg);animation:slideUp .22s ease-out}
+.modal-card{width:min(1240px,100%);max-height:88vh;overflow:auto;background:var(--bg-2);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow-lg);animation:slideUp .22s ease-out}
 @keyframes fadeIn{from{opacity:0}to{opacity:1}}
 @keyframes slideUp{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
 .modal-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg-2);z-index:1}
@@ -273,6 +273,9 @@ tbody tr.row:hover td{background:var(--surface-2)}
 .modal-head .x{width:34px;height:34px;border-radius:10px;background:var(--surface);border:1px solid var(--line);color:var(--ink-2);font-size:16px;display:grid;place-items:center}
 .modal-head .x:hover{background:var(--surface-2)}
 .modal-body{padding:22px 24px}
+.user-detail-grid{display:grid;grid-template-columns:260px minmax(0,1fr);gap:18px;align-items:start}
+.user-agent-table th,.user-agent-table td{padding-left:12px;padding-right:12px}
+.user-agent-table .bar{max-width:96px}
 
 /* Toast & loading */
 .toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);padding:11px 18px;border-radius:11px;background:var(--surface-hi);border:1px solid var(--line-2);color:var(--ink);font-weight:600;font-size:13px;box-shadow:var(--shadow-lg);opacity:0;transition:.2s;z-index:80}
@@ -299,6 +302,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
   .banner-hero .score{font-size:42px}
   .kpi{min-height:104px}
   .kpi .val{font-size:24px}
+  .user-detail-grid{grid-template-columns:1fr}
 }
 @media(max-width:768px){
   .topbar{height:auto;flex-wrap:wrap;padding:10px 14px;gap:10px}
@@ -1282,13 +1286,13 @@ async function showUser(id){
       + '<div class="card"><div class="card-head"><div class="ttl">每日活动</div></div><div class="chart-wrap sm"><canvas id="ud_daily"></canvas></div></div>'
       + '<div class="card"><div class="card-head"><div class="ttl">模型分布</div></div><div class="chart-wrap sm"><canvas id="ud_models"></canvas></div></div>'
       + '</div>'
-      + '<div class="grid-2">'
+      + '<div class="user-detail-grid">'
       + '<div class="card"><div class="card-head"><div class="ttl">分项评分' + helpTip('评分 = 代码量*50% + 辅助频率*30% + 活跃度*20%') + '</div></div><div class="card-body">'
       + miniRow('代码量得分' + helpTip('AI 写入行 / 总写入行 * 100%'), d.contribution.sub_scores.volume, 100)
       + miniRow('辅助频率' + helpTip('个人提交数 / 团队提交数 * 100%'), d.contribution.sub_scores.frequency, 100)
       + miniRow('活跃度' + helpTip('min(checkpoints / 活跃天数 / 20, 1) * 100%'), d.contribution.sub_scores.activity, 100)
       + '</div></div>'
-      + '<div class="card"><div class="card-head"><div class="ttl">Agent × 模型 AI 代码行 <span>提交到 git 中</span></div></div><div class="card-body flush"><div class="t-wrap"><table>'
+      + '<div class="card"><div class="card-head"><div class="ttl">Agent × 模型 AI 代码行 <span>提交到 git 中</span></div></div><div class="card-body flush"><div class="t-wrap"><table class="user-agent-table">'
       + '<thead><tr><th>Agent</th><th>模型</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th><th>转化率</th><th>混合行</th><th>提交</th></tr></thead><tbody>'
       + (agentModels.map(x => '<tr>'
         + '<td><b>' + esc(x.agent || 'unknown') + '</b></td>'
