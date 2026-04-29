@@ -10,7 +10,7 @@ from ..models import Team, Member, MetricEvent, CasObject, Bundle
 router = APIRouter(prefix="/api/stats", tags=["stats"])
 
 # ============================================================
-#  AI 贡献度评分: 代码量(40%) + 辅助频率(25%) + 代码留存率(20%) + 活跃度(15%)
+#  AI 贡献度评分: 代码量(50%) + 辅助频率(30%) + 活跃度(20%)
 # ============================================================
 
 
@@ -39,18 +39,54 @@ def _sum_num(value) -> int:
     return 0
 
 
+def _metric_total(value) -> int:
+    # git-ai 上报数组约定: 第 0 位是 all 汇总，后续是各 tool/model 明细。
+    if isinstance(value, list):
+        return _sum_num(value[0]) if value else 0
+    return _sum_num(value)
+
+
+def _deleted_file_lines(value) -> int:
+    if isinstance(value, (int, float)):
+        return int(value)
+    if isinstance(value, list):
+        return sum(_deleted_file_lines(v) for v in value)
+    if not isinstance(value, dict):
+        return 0
+
+    status = str(value.get("status") or value.get("change_type") or "").lower()
+    is_deleted = value.get("deleted") is True or status in {"deleted", "delete", "removed", "d"}
+    if is_deleted:
+        for key in ("deleted_lines", "lines_deleted", "old_lines", "lines"):
+            lines = _sum_num(value.get(key))
+            if lines > 0:
+                return lines
+    return sum(_deleted_file_lines(v) for v in value.values())
+
+
 def _commit_metrics(evt_data: dict) -> dict:
     if not isinstance(evt_data, dict):
         return {
             "ai_added": 0, "ai_deleted": 0, "human_added": 0,
             "total_added": 0, "total_deleted": 0, "total_edit": 0,
-            "ai_edit": 0, "non_ai_added": 0, "human_deleted": 0, "wait": 0,
+            "ai_edit": 0, "non_ai_added": 0,
         }
-    ai_added = _sum_num(evt_data.get("total_ai_additions")) or _sum_num(evt_data.get("ai_additions"))
-    ai_deleted = _sum_num(evt_data.get("total_ai_deletions"))
-    human_added = _sum_num(evt_data.get("human_additions"))
-    total_added = max(_sum_num(evt_data.get("git_diff_added_lines")), ai_added + human_added)
-    total_deleted = max(_sum_num(evt_data.get("git_diff_deleted_lines")), ai_deleted)
+    ai_added = _metric_total(evt_data.get("total_ai_additions")) or _metric_total(evt_data.get("ai_additions"))
+    ai_deleted = _metric_total(evt_data.get("total_ai_deletions"))
+    human_added = _metric_total(evt_data.get("human_additions"))
+    raw_added = _metric_total(evt_data.get("git_diff_added_lines"))
+    total_added = raw_added if raw_added > 0 or "git_diff_added_lines" in evt_data else ai_added + human_added
+    raw_deleted = _metric_total(evt_data.get("git_diff_deleted_lines"))
+    deleted_file_lines = _deleted_file_lines(
+        evt_data.get("git_diff_deleted_file_lines")
+        or evt_data.get("deleted_file_lines")
+        or evt_data.get("deleted_files_lines")
+        or evt_data.get("file_deleted_lines")
+        or evt_data.get("removed_file_lines")
+        or evt_data.get("deleted_files")
+        or evt_data.get("files")
+    )
+    total_deleted = raw_deleted - min(raw_deleted, deleted_file_lines)
     return {
         "ai_added": ai_added,
         "ai_deleted": ai_deleted,
@@ -60,8 +96,6 @@ def _commit_metrics(evt_data: dict) -> dict:
         "total_edit": total_added + total_deleted,
         "ai_edit": ai_added + ai_deleted,
         "non_ai_added": max(0, total_added - ai_added),
-        "human_deleted": max(0, total_deleted - ai_deleted),
-        "wait": _sum_num(evt_data.get("time_waiting_for_ai")),
     }
 
 
@@ -69,7 +103,7 @@ def _aggregate_commits(committed: list[tuple]) -> dict:
     totals = {
         "ai_added": 0, "ai_deleted": 0, "human_added": 0,
         "total_added": 0, "total_deleted": 0, "total_edit": 0,
-        "ai_edit": 0, "non_ai_added": 0, "human_deleted": 0, "wait": 0,
+        "ai_edit": 0, "non_ai_added": 0,
     }
     for (evt_data,) in committed:
         cm = _commit_metrics(evt_data)
@@ -77,14 +111,13 @@ def _aggregate_commits(committed: list[tuple]) -> dict:
             totals[key] += cm[key]
     totals["ai_code_pct"] = round(totals["ai_edit"] / totals["total_edit"] * 100, 1) if totals["total_edit"] > 0 else 0
     totals["ai_added_pct"] = round(totals["ai_added"] / totals["total_added"] * 100, 1) if totals["total_added"] > 0 else 0
-    totals["survival_rate"] = round(max(0, totals["ai_added"] - totals["human_deleted"]) / totals["ai_added"] * 100, 1) if totals["ai_added"] > 0 else 0
     return totals
 
 
-def _parse_committed(committed: list[tuple]) -> tuple[int, int, int, int]:
-    """返回: (AI新增行, AI删除行, 人工新增行, 等待毫秒)"""
+def _parse_committed(committed: list[tuple]) -> tuple[int, int, int]:
+    """返回: (AI新增行, AI删除行, 人工新增行)"""
     totals = _aggregate_commits(committed)
-    return totals["ai_added"], totals["ai_deleted"], totals["human_added"], totals["wait"]
+    return totals["ai_added"], totals["ai_deleted"], totals["human_added"]
 
 
 def _prompt_user_message_count(payload) -> int:
@@ -134,16 +167,15 @@ def _file_ext(path: str | None) -> str:
 
 
 def calc_score(ai_lines: int, total_lines: int, commits: int, total_commits: int,
-                human_deleted: int, checkpoints: int, active_days: int) -> dict:
+                checkpoints: int, active_days: int) -> dict:
     vol = (ai_lines / total_lines * 100) if total_lines > 0 else 0
     freq = (commits / total_commits * 100) if total_commits > 0 else 0
-    surv = (max(0, ai_lines - human_deleted) / ai_lines * 100) if ai_lines > 0 else 0
     act = min(checkpoints / max(1, active_days) / 20, 1) * 100
-    score = vol * 0.40 + freq * 0.25 + surv * 0.20 + act * 0.15
+    score = vol * 0.50 + freq * 0.30 + act * 0.20
     lv = "S" if score >= 80 else "A" if score >= 60 else "B" if score >= 40 else "C" if score >= 20 else "D"
     return {"score": round(score, 1), "level": lv,
             "sub_scores": {"volume": round(vol, 1), "frequency": round(freq, 1),
-                           "survival": round(surv, 1), "activity": round(act, 1)}}
+                           "activity": round(act, 1)}}
 
 
 
@@ -155,13 +187,14 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
     team = await get_team(db, api_key)
     if not team:
         return {"member_count": 0, "total_commits": 0, "total_events": 0,
-                "ai_acceptance_rate": 0, "ai_survival_rate": 0, "total_ai_lines": 0,
+                "ai_acceptance_rate": 0, "total_ai_lines": 0,
                 "total_human_lines": 0, "total_ai_deleted": 0, "active_users_7d": 0,
                 "active_users_30d": 0, "team_ai_score": 0, "trend": "stable",
                 "total_edit_count": 0, "total_cas": 0, "total_bundles": 0,
-                "avg_ai_lines_per_commit": 0, "avg_wait_time_ms": 0, "total_wait_time_ms": 0,
+                "avg_ai_lines_per_commit": 0,
+                "total_added_lines": 0, "total_deleted_lines": 0,
                 "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
-                "agent_edit_count": 0, "prompt_message_count": 0, "human_deleted_lines": 0}
+                "agent_edit_count": 0, "prompt_message_count": 0}
 
     member_ids = await get_member_ids(db, team.id)
     total_cas = await db.scalar(select(func.count(CasObject.id))) or 0
@@ -169,13 +202,14 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
 
     if not member_ids:
         return {"member_count": 0, "total_commits": 0, "total_events": 0,
-                "ai_acceptance_rate": 0, "ai_survival_rate": 0, "total_ai_lines": 0,
+                "ai_acceptance_rate": 0, "total_ai_lines": 0,
                 "total_human_lines": 0, "total_ai_deleted": 0, "active_users_7d": 0,
                 "active_users_30d": 0, "team_ai_score": 0, "trend": "stable",
                 "total_edit_count": 0, "total_cas": total_cas, "total_bundles": total_bundles,
-                "avg_ai_lines_per_commit": 0, "avg_wait_time_ms": 0, "total_wait_time_ms": 0,
+                "avg_ai_lines_per_commit": 0,
+                "total_added_lines": 0, "total_deleted_lines": 0,
                 "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
-                "agent_edit_count": 0, "prompt_message_count": 0, "human_deleted_lines": 0}
+                "agent_edit_count": 0, "prompt_message_count": 0}
 
     total_events = await db.scalar(
         select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids))) or 0
@@ -187,7 +221,6 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
     ai_lines = commit_totals["ai_added"]
     ai_del = commit_totals["ai_deleted"]
     human = commit_totals["human_added"]
-    wait = commit_totals["wait"]
     total_commits = len(committed)
 
     total_edit_count = await db.scalar(
@@ -212,9 +245,7 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
 
     total_all = ai_lines + human
     acc_rate = round(ai_lines / total_all * 100, 1) if total_all > 0 else 0
-    surv_rate = commit_totals["survival_rate"]
-
-    team_score = acc_rate * 0.45 + surv_rate * 0.25 + min(active_7d / max(1, len(member_ids)) * 100, 100) * 0.30
+    team_score = acc_rate * 0.60 + min(active_7d / max(1, len(member_ids)) * 100, 100) * 0.40
 
     p1_start = week_ago - timedelta(days=7)
     p1 = (await db.execute(
@@ -234,19 +265,18 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
         "total_events": total_events, "total_edit_count": total_edit_count,
         "total_cas": total_cas, "total_bundles": total_bundles,
         "active_users_7d": active_7d, "active_users_30d": active_30d,
-        "ai_acceptance_rate": acc_rate, "ai_survival_rate": surv_rate,
+        "ai_acceptance_rate": acc_rate,
         "total_ai_lines": ai_lines, "total_human_lines": human,
         "total_ai_deleted": ai_del,
+        "total_added_lines": commit_totals["total_added"],
+        "total_deleted_lines": commit_totals["total_deleted"],
         "total_edit_lines": commit_totals["total_edit"],
         "ai_edit_lines": commit_totals["ai_edit"],
         "ai_code_pct": commit_totals["ai_code_pct"],
         "agent_edit_count": ai_edit_count,
         "prompt_message_count": prompt_message_count,
-        "human_deleted_lines": commit_totals["human_deleted"],
         "team_ai_score": round(team_score, 1), "trend": trend,
         "avg_ai_lines_per_commit": round(ai_lines / total_commits) if total_commits > 0 else 0,
-        "avg_wait_time_ms": round(wait / total_commits) if total_commits > 0 else 0,
-        "total_wait_time_ms": wait,
     }
 
 
@@ -311,7 +341,6 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
     ai_lines = commit_totals["ai_added"]
     ai_del = commit_totals["ai_deleted"]
     human = commit_totals["human_added"]
-    wait = commit_totals["wait"]
     commit_count = len(committed)
     team_commit_conds = [
         MetricEvent.member_id.in_(select(Member.id).where(Member.team_id == m.team_id)),
@@ -379,7 +408,7 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
     ai_pct = commit_totals["ai_code_pct"]
     prompt_message_count = await _prompt_count_for_member(db, m.id, since)
     contribution = calc_score(ai_lines, total_lines, commit_count, team_commit_count,
-                              commit_totals["human_deleted"], edit_count, max(1, active_days))
+                              edit_count, max(1, active_days))
 
     return {
         "id": m.id, "name": m.name, "email": m.email, "distinct_id": m.distinct_id,
@@ -391,9 +420,7 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
         "total_edit_lines": commit_totals["total_edit"],
         "ai_edit_lines": commit_totals["ai_edit"],
         "ai_code_pct": commit_totals["ai_code_pct"],
-        "human_deleted_lines": commit_totals["human_deleted"],
         "prompt_message_count": prompt_message_count,
-        "total_wait_time_ms": wait,
         "last_active": last_active.isoformat() if last_active else None,
         "created_at": m.created_at.isoformat() if m.created_at else None,
         "agents": agents, "models": models, "contribution": contribution,
@@ -465,7 +492,6 @@ async def ranking(
             "total_edit_lines": detail["total_edit_lines"],
             "ai_edit_lines": detail["ai_edit_lines"],
             "ai_code_pct": detail["ai_code_pct"],
-            "human_deleted_lines": detail["human_deleted_lines"],
             "prompt_message_count": detail["prompt_message_count"],
             "commits": detail["commit_count"], "edits": detail["edit_count"],
             "active_days": detail["active_days"],
@@ -516,7 +542,7 @@ async def timeline(
         SELECT DATE(created_at) as day, COUNT(*) as events,
                SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
                SUM(CASE WHEN event_type = 2 THEN 1 ELSE 0 END) as agent_usages,
-               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits,
+                SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits,
                COUNT(DISTINCT member_id) as unique_users
         FROM metric_events
         WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
@@ -701,7 +727,7 @@ async def efficiency_trend(
         trend_list = []
         for day in all_days:
             committed_list = [(d,) for d in daily_committed.get(day, []) if isinstance(d, dict)]
-            ai_l, _, human_l, wait_ms = _parse_committed(committed_list)
+            ai_l, _, human_l = _parse_committed(committed_list)
             total = ai_l + human_l
             trend_list.append({
                 "date": day,
@@ -710,7 +736,6 @@ async def efficiency_trend(
                 "ai_pct": round(ai_l / total * 100, 1) if total > 0 else 0,
                 "commits": len(committed_list),
                 "edits": daily_edits.get(day, 0),
-                "wait_ms": wait_ms,
             })
         return {"trend": trend_list}
 
@@ -734,7 +759,8 @@ async def efficiency_trend(
         SELECT DATE(created_at) as day, COUNT(*) as edits
         FROM metric_events
         WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
-          AND event_type = 4 AND created_at >= :sd
+          AND event_type = 4
+          AND created_at >= :sd
         GROUP BY DATE(created_at)
     """)
     edit_result = await db.execute(edit_query, {"tid": team.id, "sd": start_date.isoformat()})
@@ -745,7 +771,7 @@ async def efficiency_trend(
     trend_list = []
     for day in all_days:
         committed_list = [(d,) for d in daily_committed.get(day, []) if isinstance(d, dict)]
-        ai_l, _, human_l, _ = _parse_committed(committed_list)
+        ai_l, _, human_l = _parse_committed(committed_list)
         total = ai_l + human_l
         trend_list.append({
             "date": day,
@@ -790,11 +816,16 @@ async def ai_code_trend(
     trend = []
     for day in sorted(daily.keys()):
         totals = _aggregate_commits(daily[day])
+        non_ai_edit = max(0, totals["total_edit"] - totals["ai_edit"])
         trend.append({
             "date": day,
             "ai_added_lines": totals["ai_added"],
             "non_ai_added_lines": totals["non_ai_added"],
-            "ai_code_pct": totals["ai_added_pct"],
+            "ai_deleted_lines": totals["ai_deleted"],
+            "ai_edit_lines": totals["ai_edit"],
+            "non_ai_edit_lines": non_ai_edit,
+            "total_edit_lines": totals["total_edit"],
+            "ai_code_pct": totals["ai_code_pct"],
             "commit_count": len(daily[day]),
         })
     return {"trend": trend}
@@ -859,7 +890,7 @@ async def repo_stats(
                COUNT(*) as total_events,
                SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
                COUNT(DISTINCT member_id) as contributors,
-               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits,
+               SUM(CASE WHEN event_type = 4 AND json_extract(event_data, '$.kind') IN ('ai_agent', 'ai_tab') THEN 1 ELSE 0 END) as edits,
                MAX(created_at) as last_act
         FROM metric_events
         WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
@@ -927,7 +958,6 @@ async def repo_stats(
             "ai_pct": ai_pct,
             "total_edit_lines": totals["total_edit"],
             "ai_edit_lines": totals["ai_edit"],
-            "human_deleted_lines": totals["human_deleted"],
             "prompt_message_count": prompt_message_count,
             "top_contributors": top_contributors,
             "last_activity": str(last_act) if last_act else None,
@@ -989,95 +1019,3 @@ async def time_distribution(
     peak_hours = [h["hour"] for h in sorted_hours[:3] if h["events"] > 0]
 
     return {"distribution": distribution, "peak_hours": peak_hours}
-
-
-# ============================================================
-#  /wait-time-analysis  AI等待耗时分析
-# ============================================================
-@router.get("/wait-time-analysis")
-async def wait_time_analysis(
-    days: int = Query(default=30, le=365),
-    db: AsyncSession = Depends(get_db),
-    api_key: str = Header(None, alias="X-API-Key"),
-):
-    team = await get_team(db, api_key)
-    if not team:
-        return {"by_user": [], "by_model": [], "total_wait_ms": 0, "avg_wait_per_commit_ms": 0}
-    member_ids = await get_member_ids(db, team.id)
-    if not member_ids:
-        return {"by_user": [], "by_model": [], "total_wait_ms": 0, "avg_wait_per_commit_ms": 0}
-
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
-
-    # 查出所有 committed 事件的原始数据 (含 member_id)
-    result = await db.execute(
-        select(MetricEvent.member_id, MetricEvent.event_data)
-        .where(MetricEvent.member_id.in_(member_ids),
-               MetricEvent.event_type == 1,
-               MetricEvent.created_at >= start_date))
-
-    # 按 member 和 model 分别聚合
-    user_agg: dict[str, dict] = {}   # member_id -> {wait, count}
-    model_agg: dict[str, dict] = {}  # model -> {wait, count}
-    total_wait = 0
-    total_commits = 0
-
-    for mid, evt_data in result.all():
-        if not isinstance(evt_data, dict):
-            continue
-
-        wt_raw = evt_data.get("time_waiting_for_ai") or []
-        wt = sum(wt_raw) if isinstance(wt_raw, list) else (wt_raw if isinstance(wt_raw, (int, float)) else 0)
-
-        total_wait += wt
-        total_commits += 1
-
-        # 按用户聚合
-        if mid not in user_agg:
-            user_agg[mid] = {"total_wait_ms": 0, "commit_count": 0}
-        user_agg[mid]["total_wait_ms"] += wt
-        user_agg[mid]["commit_count"] += 1
-
-        # 按模型聚合
-        model = evt_data.get("model") or "unknown"
-        if model not in model_agg:
-            model_agg[model] = {"total_wait_ms": 0, "usage_count": 0}
-        model_agg[model]["total_wait_ms"] += wt
-        model_agg[model]["usage_count"] += 1
-
-    # 查询 member 名称
-    member_name_map: dict[str, str] = {}
-    if user_agg:
-        name_result = await db.execute(
-            select(Member.id, Member.name).where(Member.id.in_(list(user_agg.keys()))))
-        member_name_map = {r[0]: r[1] for r in name_result.all()}
-
-    by_user = []
-    for mid, agg in user_agg.items():
-        cnt = agg["commit_count"]
-        by_user.append({
-            "id": mid,
-            "name": member_name_map.get(mid, "unknown"),
-            "total_wait_ms": agg["total_wait_ms"],
-            "avg_wait_ms": round(agg["total_wait_ms"] / cnt) if cnt > 0 else 0,
-            "commit_count": cnt,
-        })
-    by_user.sort(key=lambda x: x["total_wait_ms"], reverse=True)
-
-    by_model = []
-    for model, agg in model_agg.items():
-        cnt = agg["usage_count"]
-        by_model.append({
-            "model": model,
-            "total_wait_ms": agg["total_wait_ms"],
-            "avg_wait_ms": round(agg["total_wait_ms"] / cnt) if cnt > 0 else 0,
-            "usage_count": cnt,
-        })
-    by_model.sort(key=lambda x: x["total_wait_ms"], reverse=True)
-
-    return {
-        "by_user": by_user,
-        "by_model": by_model,
-        "total_wait_ms": total_wait,
-        "avg_wait_per_commit_ms": round(total_wait / total_commits) if total_commits > 0 else 0,
-    }

@@ -39,7 +39,7 @@ VALUE_KEYS = {
         "0": "human_additions", "1": "git_diff_deleted_lines", "2": "git_diff_added_lines",
         "3": "tool_model_pairs", "4": "mixed_additions", "5": "ai_additions",
         "6": "ai_accepted", "7": "total_ai_additions", "8": "total_ai_deletions",
-        "9": "time_waiting_for_ai", "10": "first_checkpoint_ts",
+        "10": "first_checkpoint_ts",
         "11": "commit_subject", "12": "commit_body",
     },
     3: {  # InstallHooks
@@ -59,7 +59,7 @@ def decode_pos(pos_map: dict) -> dict:
 
 def decode_values(event_type: int, pos_map: dict) -> dict:
     keys = VALUE_KEYS.get(event_type, {})
-    return {keys.get(k, f"val_{k}"): v for k, v in pos_map.items()}
+    return {keys.get(k, f"val_{k}"): v for k, v in pos_map.items() if not (event_type == 1 and k == "9")}
 
 
 def _custom_attributes(attrs: dict) -> dict:
@@ -126,7 +126,8 @@ async def metrics_upload(
             if not allowed_repo_url(repo_url):
                 continue
             event_values = decode_values(event_type, event.get("v", {}))
-            merged = {**event_attrs, **event_values, "_event_type": event_type,
+            event_extra = {k: v for k, v in event.items() if k not in {"e", "a", "v"}}
+            merged = {**event_extra, **event_attrs, **event_values, "_event_type": event_type,
                        "_event_name": EVENT_NAMES.get(event_type, f"Unknown({event_type})")}
             member_id = await resolve_member(db, api_key, event_attrs)
             db.add(MetricEvent(

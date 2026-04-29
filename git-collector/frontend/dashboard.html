@@ -365,8 +365,8 @@ tbody tr.row:hover td{background:var(--surface-2)}
     <section id="overview" class="section active">
       <!-- Banner -->
       <div class="banner">
-        <div class="kpi"><div class="head"><span class="ttl-wrap">总编辑行数 <i class="tip" data-tip="SUM(git_diff_added_lines + git_diff_deleted_lines)">?</i></span><div class="icon">◉</div></div>
-          <div class="val" id="kAdopt">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAdoptD">→</span><span id="kAdoptM">新增 + 删除</span></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">总编辑行数 <i class="tip" data-tip="SUM(git_diff_added_lines + git_diff_deleted_lines - 整文件删除行)">?</i></span><div class="icon">◉</div></div>
+          <div class="val" id="kAdopt">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAdoptD">→</span><span id="kAdoptM">新增 + 删除（不含整文件删除）</span></div>
           <canvas class="spark" id="spkAdopt"></canvas></div>
         <div class="kpi"><div class="head"><span class="ttl-wrap">AI 编辑行数 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></span><div class="icon">∑</div></div>
           <div class="val" id="kAcc">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAccD">→</span><span id="kAccM">AI 新增 + AI 删除</span></div>
@@ -466,7 +466,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
       <!-- AI code trend -->
       <div class="card">
         <div class="card-head">
-          <div class="ttl">AI 代码占比趋势 <span>AI 新增 · 非 AI 新增 · 占比 · 提交</span></div>
+          <div class="ttl">AI 代码占比趋势 <span>AI 编辑 · 非 AI 编辑 · 占比 · 提交</span></div>
           <div class="actions">
             <select class="select" id="effUser" onchange="refreshEfficiency()" style="height:30px;font-size:11.5px">
               <option value="">全员汇总</option>
@@ -506,8 +506,8 @@ tbody tr.row:hover td{background:var(--surface-2)}
         </div>
         <div class="card-body flush"><div class="t-wrap"><table>
           <thead><tr>
-            <th style="width:36px">#</th><th>成员</th><th>AI 编辑行 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></th><th>总编辑行 <i class="tip" data-tip="SUM(git_diff_added_lines + git_diff_deleted_lines)">?</i></th>
-            <th>AI 占比 <i class="tip" data-tip="AI 编辑行数 / 总编辑行数 * 100%">?</i></th><th>留存率 <i class="tip" data-tip="max(AI 新增行 - 人工删除行, 0) / AI 新增行 * 100%">?</i></th><th>提交</th>
+            <th style="width:36px">#</th><th>成员</th><th>AI 编辑行 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></th><th>总编辑行 <i class="tip" data-tip="新增行 + 删除行，排除整文件删除行">?</i></th>
+            <th>AI 占比 <i class="tip" data-tip="AI 编辑行数 / 总编辑行数 * 100%">?</i></th><th>提交</th>
             <th>Agent 编辑</th><th>Prompt <i class="tip" data-tip="COUNT(CAS/Bundle messages WHERE role='user')">?</i></th><th>偏好模型 <i class="tip" data-tip="COUNT(DISTINCT model)">?</i></th><th>偏好 Agent</th>
           </tr></thead>
           <tbody id="rankingBody"></tbody>
@@ -519,13 +519,13 @@ tbody tr.row:hover td{background:var(--surface-2)}
     <section id="trends" class="section">
       <div class="grid-2">
         <div class="card">
-          <div class="card-head"><div class="ttl">活跃趋势 <span>提交 · AI 编辑 · 活跃成员</span></div>
+          <div class="card-head"><div class="ttl">活跃趋势 <span>提交 · Checkpoint · 活跃成员</span></div>
             <div class="actions"><select class="select" id="tlUser" onchange="refreshTimeline()" style="height:30px;font-size:11.5px"><option value="">全员</option></select></div>
           </div>
           <div class="chart-wrap"><canvas id="tlChart"></canvas></div>
         </div>
         <div class="card">
-          <div class="card-head"><div class="ttl">12 周趋势 <span>提交 vs AI 编辑</span></div></div>
+          <div class="card-head"><div class="ttl">12 周趋势 <span>提交 vs Checkpoint</span></div></div>
           <div class="chart-wrap"><canvas id="weeklyChart"></canvas></div>
         </div>
       </div>
@@ -796,7 +796,7 @@ async function refreshAll(){
 /* ─── Banner KPI ───────────────────────────────────────────── */
 function renderBanner(d, trend, models){
   $('kAdopt').innerHTML = fmt(d.total_edit_lines || 0) + '<small>行</small>';
-  $('kAdoptM').textContent = '新增 ' + fmt((d.total_edit_lines || 0) - (d.total_ai_deleted || 0) - (d.human_deleted_lines || 0)) + ' / 删除 ' + fmt((d.total_ai_deleted || 0) + (d.human_deleted_lines || 0));
+  $('kAdoptM').textContent = '新增 ' + fmt(d.total_added_lines || 0) + ' / 删除 ' + fmt(d.total_deleted_lines || 0);
 
   $('kAcc').innerHTML = fmt(d.ai_edit_lines || 0) + '<small>行</small>';
   $('kAccM').textContent = '新增 ' + fmt(d.total_ai_lines || 0) + ' / 删除 ' + fmt(d.total_ai_deleted || 0);
@@ -1013,11 +1013,10 @@ function renderPeopleStats(rank){
 }
 function renderRanking(rank){
   const tbody = $('rankingBody');
-  if(!rank.length){ tbody.innerHTML = '<tr><td colspan="11" class="empty">暂无成员数据</td></tr>'; return; }
+  if(!rank.length){ tbody.innerHTML = '<tr><td colspan="10" class="empty">暂无成员数据</td></tr>'; return; }
   tbody.innerHTML = rank.map((u, i) => {
     const r = i + 1;
     const rcls = r === 1 ? 'gold' : r === 2 ? 'silver' : r === 3 ? 'bronze' : '';
-    const surv = u.contribution.sub_scores ? u.contribution.sub_scores.survival : 0;
     return '<tr class="row" data-name="' + esc(u.name).toLowerCase() + '" onclick="showUser(\'' + u.id + '\')">'
       + '<td><span class="rank-pill ' + rcls + '">' + r + '</span></td>'
       + '<td><div class="member-cell"><div class="avatar" style="background:' + avatarColor(u.name) + '">' + initials(u.name) + '</div>'
@@ -1025,7 +1024,6 @@ function renderRanking(rank){
       + '<td><b class="tabular">' + fmt(u.ai_edit_lines || 0) + '</b></td>'
       + '<td class="tabular">' + fmt(u.total_edit_lines || 0) + '</td>'
       + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(u.ai_code_pct || u.ai_pct || 0, 100) + '%"></i></div><span class="num">' + pct(u.ai_code_pct || u.ai_pct || 0) + '</span></div></td>'
-      + '<td><span class="tag ' + (surv >= 80 ? 'green' : surv >= 50 ? 'amber' : 'red') + '">' + pct(surv) + '</span></td>'
       + '<td class="tabular">' + (u.commits || 0) + '</td>'
       + '<td class="tabular">' + (u.edits || 0) + '</td>'
       + '<td class="tabular">' + fmt(u.prompt_message_count || 0) + '</td>'
@@ -1062,8 +1060,8 @@ function renderEfficiency(d){
   buildChart('effChart', 'line', {
     labels: trend.map(x => x.date),
     datasets: [
-      { type: 'bar', label: 'AI 新增行', data: trend.map(x => x.ai_added_lines || 0), backgroundColor: 'rgba(63,185,80,.55)', borderRadius: 4, stack: 'add', order: 3 },
-      { type: 'bar', label: '非 AI 新增行', data: trend.map(x => x.non_ai_added_lines || 0), backgroundColor: 'rgba(91,141,239,.35)', borderRadius: 4, stack: 'add', order: 4 },
+      { type: 'bar', label: 'AI 编辑行', data: trend.map(x => x.ai_edit_lines || x.ai_added_lines || 0), backgroundColor: 'rgba(63,185,80,.55)', borderRadius: 4, stack: 'edit', order: 3 },
+      { type: 'bar', label: '非 AI 编辑行', data: trend.map(x => x.non_ai_edit_lines || x.non_ai_added_lines || 0), backgroundColor: 'rgba(91,141,239,.35)', borderRadius: 4, stack: 'edit', order: 4 },
       { type: 'line', label: 'AI 占比 %', yAxisID: 'y2', data: trend.map(x => x.ai_code_pct || 0), borderColor: '#d29922', tension: .35, pointRadius: 0, borderWidth: 2.5, order: 1 },
       { type: 'line', label: '提交次数', yAxisID: 'y3', data: trend.map(x => x.commit_count || 0), borderColor: '#39c5bb', tension: .35, pointRadius: 0, borderWidth: 2, borderDash: [4,4], order: 2 }
     ]
@@ -1071,7 +1069,7 @@ function renderEfficiency(d){
     interaction: { mode: 'index', intersect: false },
     scales: {
       x: { grid: { display: false } },
-      y: { stacked: true, position: 'left', grid: { color: t.grid }, title: { display: true, text: '新增行', color: t.muted, font: { size: 11 } } },
+      y: { stacked: true, position: 'left', grid: { color: t.grid }, title: { display: true, text: '编辑行', color: t.muted, font: { size: 11 } } },
       y2: { position: 'right', grid: { display: false }, title: { display: true, text: 'AI 占比 %', color: t.muted, font: { size: 11 } }, beginAtZero: true, max: 100 },
       y3: { display: false, beginAtZero: true }
     },
@@ -1091,7 +1089,7 @@ function renderTimeline(d){
     labels: tl.map(x => x.date),
     datasets: [
       { label: '提交', data: tl.map(x => x.commits), borderColor: '#5b8def', backgroundColor: hexToRgba('#5b8def',.12), tension: .35, fill: true, pointRadius: 0, borderWidth: 2 },
-      { label: 'AI 编辑', data: tl.map(x => x.edits), borderColor: '#3fb950', backgroundColor: hexToRgba('#3fb950',.10), tension: .35, fill: true, pointRadius: 0, borderWidth: 2 },
+      { label: 'Checkpoint', data: tl.map(x => x.edits), borderColor: '#3fb950', backgroundColor: hexToRgba('#3fb950',.10), tension: .35, fill: true, pointRadius: 0, borderWidth: 2 },
       { label: '活跃成员', data: tl.map(x => x.unique_users || 0), borderColor: '#d29922', tension: .35, pointRadius: 0, borderWidth: 2, borderDash: [3, 3] }
     ]
   }, { interaction: { mode: 'index', intersect: false } });
@@ -1124,7 +1122,7 @@ function renderWeekly(d){
     labels: w.map(x => x.week),
     datasets: [
       { label: '提交', data: w.map(x => x.commits), backgroundColor: '#5b8def', borderRadius: 5, stack: 's' },
-      { label: 'AI 编辑', data: w.map(x => x.edits), backgroundColor: '#3fb950', borderRadius: 5, stack: 's' }
+      { label: 'Checkpoint', data: w.map(x => x.edits), backgroundColor: '#3fb950', borderRadius: 5, stack: 's' }
     ]
   }, { scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } } });
 }
@@ -1195,14 +1193,13 @@ async function showUser(id){
   try {
     const d = await api('/api/stats/user-detail/' + id);
     const acc = d.ai_code_pct || d.ai_pct || 0;
-    const surv = d.contribution.sub_scores ? d.contribution.sub_scores.survival : 0;
     $('modalCard').innerHTML =
       '<div class="modal-head"><div class="who"><div class="avatar" style="background:' + avatarColor(d.name) + '">' + initials(d.name) + '</div>'
       + '<h2>' + esc(d.name) + '<small>' + esc(d.email || d.distinct_id || '') + '</small></h2></div>'
       + '<button class="x" onclick="$(\'modal\').classList.remove(\'show\')">×</button></div>'
       + '<div class="modal-body">'
       + '<div class="grid-3" style="margin-bottom:18px">'
-      + kpiCard('评分' + helpTip('评分 = 代码量*40% + 辅助频率*25% + 代码留存率*20% + 活跃度*15%'), d.contribution.score, '<span class="lvl-tag lvl-' + d.contribution.level + '">' + d.contribution.level + '</span> 等级' + helpTip('S>=80；A>=60；B>=40；C>=20；D<20'))
+      + kpiCard('评分' + helpTip('评分 = 代码量*50% + 辅助频率*30% + 活跃度*20%'), d.contribution.score, '<span class="lvl-tag lvl-' + d.contribution.level + '">' + d.contribution.level + '</span> 等级' + helpTip('S>=80；A>=60；B>=40；C>=20；D<20'))
       + kpiCard('AI 编辑行', fmt(d.ai_edit_lines || 0), '占比 ' + pct(acc) + ' · 总编辑 ' + fmt(d.total_edit_lines || 0))
       + kpiCard('提交 / Agent 编辑', d.commit_count + ' / ' + d.edit_count, 'Prompt ' + fmt(d.prompt_message_count || 0) + ' 条 · 模型 ' + ((d.models || []).length) + ' 个' + helpTip('COUNT(DISTINCT model)'))
       + '</div>'
@@ -1211,10 +1208,9 @@ async function showUser(id){
       + '<div class="card"><div class="card-head"><div class="ttl">模型分布</div></div><div class="chart-wrap sm"><canvas id="ud_models"></canvas></div></div>'
       + '</div>'
       + '<div class="grid-2">'
-      + '<div class="card"><div class="card-head"><div class="ttl">分项评分' + helpTip('评分 = 代码量*40% + 辅助频率*25% + 代码留存率*20% + 活跃度*15%') + '</div></div><div class="card-body">'
+      + '<div class="card"><div class="card-head"><div class="ttl">分项评分' + helpTip('评分 = 代码量*50% + 辅助频率*30% + 活跃度*20%') + '</div></div><div class="card-body">'
       + miniRow('代码量得分' + helpTip('AI 写入行 / 总写入行 * 100%'), d.contribution.sub_scores.volume, 100)
       + miniRow('辅助频率' + helpTip('个人提交数 / 团队提交数 * 100%'), d.contribution.sub_scores.frequency, 100)
-      + miniRow('代码留存率' + helpTip('max(AI 新增行 - 人工删除行, 0) / AI 新增行 * 100%'), d.contribution.sub_scores.survival, 100)
       + miniRow('活跃度' + helpTip('min(checkpoints / 活跃天数 / 20, 1) * 100%'), d.contribution.sub_scores.activity, 100)
       + '</div></div>'
       + '<div class="card"><div class="card-head"><div class="ttl">高频文件 Top 10</div></div><div class="card-body flush"><div class="t-wrap"><table>'

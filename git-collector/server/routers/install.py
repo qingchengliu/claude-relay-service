@@ -568,6 +568,10 @@ echo "[3/${{TOTAL}}] 生成配置..."
 CONFIG_DIR="$HOME/.git-ai"
 USER_LINE=""
 [ -n "$USER_NAME" ] && USER_LINE=", \"user\": \"${{USER_NAME}}\""
+if [ -n "$USER_NAME" ]; then
+    mkdir -p "$CONFIG_DIR/internal"
+    printf '%s\n' "$USER_NAME" > "$CONFIG_DIR/internal/distinct_id"
+fi
 cat > "$CONFIG_DIR/config.json" << EOFCFG
 {{
   "git_path": "${{REAL_GIT}}",
@@ -812,8 +816,14 @@ try {{
 # ── 4. Write config.json ──
 Write-Host "[4/$TOTAL] 生成配置..." -ForegroundColor Yellow
 $CONFIG_DIR = "$env:USERPROFILE\.git-ai"
+$utf8 = New-Object System.Text.UTF8Encoding($false)
 $customAttrs = @{{ team = $TEAM_NAME }}
-if ($USER_NAME) {{ $customAttrs['user'] = $USER_NAME }}
+if ($USER_NAME) {{
+    $customAttrs['user'] = $USER_NAME
+    $internalDir = "$CONFIG_DIR\internal"
+    New-Item -ItemType Directory -Force -Path $internalDir | Out-Null
+    [System.IO.File]::WriteAllText("$internalDir\distinct_id", "$USER_NAME`n", $utf8)
+}}
 
 $CONFIG = @{{
     git_path              = $REAL_GIT
@@ -827,7 +837,6 @@ $CONFIG = @{{
     telemetry_oss_disabled = $true
 }} | ConvertTo-Json -Depth 3 -Compress
 
-$utf8 = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText("$CONFIG_DIR\config.json", $CONFIG, $utf8)
 Write-Host "  配置: $CONFIG_DIR\config.json" -ForegroundColor Green
 

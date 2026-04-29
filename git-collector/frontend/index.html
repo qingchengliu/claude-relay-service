@@ -439,8 +439,8 @@ code{font-family:'Cascadia Code','Fira Code','JetBrains Mono',Consolas,monospace
 
     <p class="card-desc" style="margin-top:16px">需要卸载时，执行对应系统的一键卸载命令：</p>
     <div class="tabs" style="margin-top:8px">
-      <button class="tab active" onclick="switchUninstallTab('un-win')">Windows 卸载</button>
-      <button class="tab" onclick="switchUninstallTab('un-mac')">macOS / Linux 卸载</button>
+      <button class="tab active" onclick="switchUninstallTab('un-win', event)">Windows 卸载</button>
+      <button class="tab" onclick="switchUninstallTab('un-mac', event)">macOS / Linux 卸载</button>
     </div>
     <div class="tab-panels">
       <div class="tab-panel show" id="tab-un-win">
@@ -622,23 +622,24 @@ git ai diff HEAD</code>
 <script>
 (function(){
   var host = window.location.host;
+  var baseUrl = window.location.protocol + '//' + host;
   document.getElementById('mac-cmd').textContent =
-    'curl -sSL http://' + host + '/install.sh | bash';
+    'curl -sSL ' + baseUrl + '/install.sh | bash';
   document.getElementById('win-cmd').textContent =
-    'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm http://' + host + '/install.ps1 | iex"';
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri \'' + baseUrl + '/install.ps1\' | Invoke-Expression"';
   document.getElementById('un-mac-cmd').textContent =
-    'curl -sSL http://' + host + '/uninstall.sh | bash';
+    'curl -sSL ' + baseUrl + '/uninstall.sh | bash';
   document.getElementById('un-win-cmd').textContent =
-    'pwsh -NoProfile -ExecutionPolicy Bypass -Command "irm http://' + host + '/uninstall.ps1 | iex"';
+    'powershell -NoProfile -ExecutionPolicy Bypass -Command "Invoke-RestMethod -Uri \'' + baseUrl + '/uninstall.ps1\' | Invoke-Expression"';
 })();
 
-function switchUninstallTab(os){
+function switchUninstallTab(os, evt){
   var activeWin = os === 'un-win';
   document.getElementById('tab-un-win').classList.toggle('show', activeWin);
   document.getElementById('tab-un-mac').classList.toggle('show', !activeWin);
   var btns = document.querySelectorAll('.tabs button');
   btns.forEach(function(b){ if(b.textContent.indexOf('卸载') >= 0) b.classList.remove('active'); });
-  event.target.classList.add('active');
+  if (evt && evt.target) evt.target.classList.add('active');
 }
 
 function switchTab(os){
@@ -657,13 +658,38 @@ function switchTab(os){
 
 function copy(btn, id){
   var text = document.getElementById(id).textContent;
-  navigator.clipboard.writeText(text).then(function(){
+  copyText(text).then(function(){
     btn.textContent = '已复制!';
     btn.classList.add('copied');
     setTimeout(function(){
       btn.textContent = '复制';
       btn.classList.remove('copied');
     }, 2000);
+  }).catch(function(){
+    btn.textContent = '复制失败';
+    setTimeout(function(){ btn.textContent = '复制'; }, 2000);
+  });
+}
+
+function copyText(text){
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise(function(resolve, reject){
+    var ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    try {
+      document.execCommand('copy') ? resolve() : reject(new Error('copy failed'));
+    } catch (err) {
+      reject(err);
+    } finally {
+      document.body.removeChild(ta);
+    }
   });
 }
 </script>
