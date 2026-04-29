@@ -1,0 +1,28 @@
+git-collector/server/routers/metrics.py
+  10bf0fbea586babd 42,62,131-133
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6c3b8f8c1743def646f9f629281605688dff6ee6",
+  "prompts": {
+    "10bf0fbea586babd": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dd808-25a5-7c92-8c17-4a042ec3f0d6",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 3,
+      "accepted_lines": 5,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/8cfec40d6fbc0f6f4c75c7512d1e5fd89afb5b6905c5a0870f7f9efa262ae58b",
+      "custom_attributes": {
+        "team": "风控研发中心",
+        "user": "doveliu"
+      }
+    }
+  }
+}
