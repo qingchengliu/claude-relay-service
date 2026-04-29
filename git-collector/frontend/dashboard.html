@@ -134,6 +134,13 @@ input,select{font:inherit;color:inherit}
 .grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:18px}
 .grid-asym{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px}
 .grid-asym-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:18px}
+.overview-prime{display:grid;grid-template-columns:minmax(0,1.2fr) minmax(300px,.92fr) minmax(250px,.68fr);gap:18px}
+.overview-prime .card-head{padding:13px 15px}
+.chart-wrap.prime{height:236px;padding:12px 14px 14px}
+.overview-support{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(330px,1fr) minmax(260px,.72fr);gap:18px}
+.overview-support .adoption,.overview-support .heatmap{padding:14px}
+.overview-support .wall{grid-template-columns:repeat(auto-fill,minmax(72px,1fr));gap:5px}
+.overview-support .cell{height:30px}
 
 /* KPI tooltip (? icon) */
 .kpi .head .ttl-wrap{display:inline-flex;align-items:center;gap:6px}
@@ -159,6 +166,12 @@ input,select{font:inherit;color:inherit}
 .funnel-num b{font-size:16px;font-weight:800;letter-spacing:-.02em}
 .funnel-num small{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}
 .funnel-conv{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:5px;background:var(--surface-hi);color:var(--muted);font-size:10.5px;font-weight:600;margin-left:6px}
+.compact-funnel .funnel{padding:12px 14px;gap:7px}
+.compact-funnel .funnel-row{grid-template-columns:84px 1fr 54px;gap:8px}
+.compact-funnel .funnel-bar{height:22px;border-radius:8px}
+.compact-funnel .funnel-lbl{font-size:11px}
+.compact-funnel .funnel-lbl small,.compact-funnel .funnel-num small,.compact-funnel .funnel-conv{display:none}
+.compact-funnel .funnel-num b{font-size:14px}
 
 /* Quadrant scatter & legend */
 .quad-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
@@ -276,7 +289,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
   .banner-hero .score{font-size:46px}
 }
 @media(max-width:1280px){
-  .grid-asym,.grid-asym-2{grid-template-columns:1fr}
+  .grid-asym,.grid-asym-2,.overview-prime,.overview-support{grid-template-columns:1fr}
   .funnel-row{grid-template-columns:120px 1fr 100px;gap:10px}
 }
 @media(max-width:1024px){
@@ -294,6 +307,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
   .workspace{padding:14px;gap:14px}
   .grid-2,.grid-3{grid-template-columns:1fr}
   .chart-wrap{height:240px}
+  .chart-wrap.prime{height:230px}
   .chart-wrap.lg{height:280px}
   .funnel{padding:14px}
   .funnel-row{grid-template-columns:96px 1fr 84px;gap:8px}
@@ -382,28 +396,34 @@ tbody tr.row:hover td{background:var(--surface-2)}
           <canvas class="spark" id="spkModel"></canvas></div>
       </div>
 
-      <!-- Adoption Funnel + Productivity Quadrant -->
-      <div class="grid-asym-2">
-        <div class="card">
-          <div class="card-head">
-            <div class="ttl">采纳漏斗 <span>Adoption Funnel · 5 阶段</span></div>
-            <div class="actions"><span class="tag" id="funnelHint">从全员到高频使用者</span></div>
-          </div>
-          <div class="funnel" id="funnel"></div>
-        </div>
+      <!-- First-screen overview charts -->
+      <div class="overview-prime">
         <div class="card">
           <div class="card-head">
             <div class="ttl">生产力四象限 <span>Productivity Quadrant</span>
               <i class="tip" data-tip="X=AI 行/(AI 行+人工行)*100%；Y=提交数；气泡=AI 行数" style="margin-left:6px">?</i>
             </div>
           </div>
-          <div class="chart-wrap" style="height:280px"><canvas id="quadChart"></canvas></div>
+          <div class="chart-wrap prime"><canvas id="quadChart"></canvas></div>
           <div class="quad-meta" id="quadMeta"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="ttl">每日活跃人数 <span id="activeUsersWindow">近 - 天 · Checkpoint/Commit 活跃</span></div>
+          </div>
+          <div class="chart-wrap prime"><canvas id="activeUsersChart"></canvas></div>
+        </div>
+        <div class="card compact-funnel">
+          <div class="card-head">
+            <div class="ttl">采纳漏斗 <span>Adoption Funnel · 5 阶段</span></div>
+            <div class="actions"><span class="tag" id="funnelHint">从全员到高频使用者</span></div>
+          </div>
+          <div class="funnel" id="funnel"></div>
         </div>
       </div>
 
-      <!-- Adoption wall + Hourly heatmap -->
-      <div class="grid-asym">
+      <!-- Adoption wall + Hourly heatmap + Code mix -->
+      <div class="overview-support">
         <div class="card adoption">
           <div class="adoption-head">
             <div class="ttl" style="display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:700">
@@ -444,11 +464,15 @@ tbody tr.row:hover td{background:var(--surface-2)}
             <span id="peakHoursTxt"></span>
           </div>
         </div>
+
+        <div class="card">
+          <div class="card-head"><div class="ttl">AI / 非 AI 代码构成 <span>最终新增代码</span></div></div>
+          <div class="chart-wrap sm"><canvas id="linesChart"></canvas></div>
+        </div>
       </div>
 
-      <!-- Trend + leaderboard preview -->
-      <div class="grid-asym-2">
-        <div class="card">
+      <!-- Leaderboard preview -->
+      <div class="card">
           <div class="card-head"><div class="ttl">成员 AI 代码排名 <span>本期 AI 代码行 Top 8</span><i class="tip" data-tip="按最终进入 commit 的 AI 代码行数降序排序">?</i></div>
             <div class="actions"><button class="iconbtn" onclick="showTab('people')" title="查看全部" style="font-size:11px;width:auto;padding:0 10px;height:28px">查看全部 →</button></div>
           </div>
@@ -456,11 +480,6 @@ tbody tr.row:hover td{background:var(--surface-2)}
             <thead><tr><th style="width:36px">#</th><th>成员</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th></tr></thead>
             <tbody id="topPerformers"></tbody>
           </table></div></div>
-        </div>
-        <div class="card">
-          <div class="card-head"><div class="ttl">AI / 非 AI 代码构成 <span>最终新增代码</span></div></div>
-          <div class="chart-wrap"><canvas id="linesChart"></canvas></div>
-        </div>
       </div>
 
       <!-- AI code trend -->
@@ -787,6 +806,7 @@ async function refreshAll(){
     renderPeopleStats(state.ranking);
     renderLines(arr[0]);
     renderEfficiency(arr[6]);
+    renderActiveUsers(arr[5]);
     renderTimeline(arr[5]);
     renderHeatmap(arr[7]);
     renderRepos(arr[8]);
@@ -1105,6 +1125,31 @@ function renderTimeline(d){
       { label: '活跃成员', data: tl.map(x => x.unique_users || 0), borderColor: '#d29922', tension: .35, pointRadius: 0, borderWidth: 2, borderDash: [3, 3] }
     ]
   }, { interaction: { mode: 'index', intersect: false } });
+}
+function renderActiveUsers(d){
+  const tl = d.timeline || [];
+  const days = $('globalDays').value || 30;
+  $('activeUsersWindow').textContent = '仅近 ' + days + ' 天 · Checkpoint/Commit 活跃';
+  buildChart('activeUsersChart', 'line', {
+    labels: tl.map(x => x.date),
+    datasets: [{
+      label: '活跃人数',
+      data: tl.map(x => x.unique_users || x.active_users || 0),
+      borderColor: '#39c5bb',
+      backgroundColor: hexToRgba('#39c5bb', .14),
+      tension: .35,
+      fill: true,
+      pointRadius: tl.length > 45 ? 0 : 2,
+      pointHoverRadius: 4,
+      borderWidth: 2.5
+    }]
+  }, {
+    interaction: { mode: 'index', intersect: false },
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, ticks: { precision: 0 } }
+    }
+  });
 }
 async function refreshTimeline(){
   const uid = $('tlUser').value;
