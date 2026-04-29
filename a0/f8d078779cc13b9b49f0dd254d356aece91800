@@ -1,0 +1,32 @@
+docker-compose-git.yml
+  a5289d30c640506c 3-8
+git-collector/.env.example
+  a5289d30c640506c 18-22
+git-collector/Dockerfile
+  a5289d30c640506c 1-2,7-9
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "a0f8d078779cc13b9b49f0dd254d356aece91800",
+  "prompts": {
+    "a5289d30c640506c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dd706-d6bb-7e51-bb3c-aeae86394d6c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 3,
+      "accepted_lines": 28,
+      "overriden_lines": 0,
+      "messages_url": "http://localhost:8000/cas/d4739d23357e4d45f441f3a120f362fc38b44c6994b83d1bb0c598ccdc2ad718",
+      "custom_attributes": {
+        "team": "风控研发中心",
+        "user": "doveliu"
+      }
+    }
+  }
+}
