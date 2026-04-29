@@ -69,11 +69,14 @@ def _commit_metrics(evt_data: dict) -> dict:
         return {
             "ai_added": 0, "ai_deleted": 0, "ai_activity_added": 0,
             "ai_activity_deleted": 0, "ai_activity": 0, "human_added": 0,
+            "mixed_added": 0, "ai_accepted": 0,
             "total_added": 0, "total_deleted": 0, "total_edit": 0,
             "ai_edit": 0, "non_ai_added": 0,
         }
     # ai_additions 是最终进入 commit 的 AI 代码；total_ai_* 是过程活动量，不能用于代码占比。
     ai_added = _metric_total(evt_data.get("ai_additions"))
+    mixed_added = _metric_total(evt_data.get("mixed_additions"))
+    ai_accepted = _metric_total(evt_data.get("ai_accepted"))
     activity_ai_added = _metric_total(evt_data.get("total_ai_additions")) or ai_added
     activity_ai_deleted = _metric_total(evt_data.get("total_ai_deletions"))
     human_added = _metric_total(evt_data.get("human_additions"))
@@ -97,6 +100,8 @@ def _commit_metrics(evt_data: dict) -> dict:
         "ai_activity_deleted": activity_ai_deleted,
         "ai_activity": activity_ai_added + activity_ai_deleted,
         "human_added": human_added,
+        "mixed_added": mixed_added,
+        "ai_accepted": ai_accepted,
         "total_added": total_added,
         "total_deleted": total_deleted,
         "total_edit": total_added + total_deleted,
@@ -109,6 +114,7 @@ def _aggregate_commits(committed: list[tuple]) -> dict:
     totals = {
         "ai_added": 0, "ai_deleted": 0, "ai_activity_added": 0,
         "ai_activity_deleted": 0, "ai_activity": 0, "human_added": 0,
+        "mixed_added": 0, "ai_accepted": 0,
         "total_added": 0, "total_deleted": 0, "total_edit": 0,
         "ai_edit": 0, "non_ai_added": 0,
     }
@@ -275,6 +281,8 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
         "ai_acceptance_rate": acc_rate,
         "total_ai_lines": ai_lines, "total_human_lines": human,
         "total_ai_deleted": ai_del,
+        "mixed_added_lines": commit_totals["mixed_added"],
+        "ai_accepted_lines": commit_totals["ai_accepted"],
         "ai_activity_lines": commit_totals["ai_activity"],
         "ai_activity_added": commit_totals["ai_activity_added"],
         "ai_activity_deleted": commit_totals["ai_activity_deleted"],
@@ -427,6 +435,8 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
         "agent_usage_count": agent_usage_count, "repo_count": repo_count,
         "active_days": active_days, "active_7d": active_7d > 0,
         "ai_lines": ai_lines, "human_lines": human, "ai_deleted": ai_del, "ai_pct": ai_pct,
+        "mixed_added_lines": commit_totals["mixed_added"],
+        "ai_accepted_lines": commit_totals["ai_accepted"],
         "total_added_lines": commit_totals["total_added"],
         "total_deleted_lines": commit_totals["total_deleted"],
         "total_edit_lines": commit_totals["total_edit"],
@@ -502,6 +512,8 @@ async def ranking(
             "contribution": detail["contribution"],
             "ai_lines": detail["ai_lines"], "human_lines": detail["human_lines"],
             "ai_deleted": detail["ai_deleted"], "ai_pct": detail["ai_pct"],
+            "mixed_added_lines": detail["mixed_added_lines"],
+            "ai_accepted_lines": detail["ai_accepted_lines"],
             "total_added_lines": detail["total_added_lines"],
             "total_deleted_lines": detail["total_deleted_lines"],
             "total_edit_lines": detail["total_edit_lines"],
@@ -838,6 +850,8 @@ async def ai_code_trend(
             "ai_added_lines": totals["ai_added"],
             "non_ai_added_lines": totals["non_ai_added"],
             "ai_deleted_lines": totals["ai_deleted"],
+            "mixed_added_lines": totals["mixed_added"],
+            "ai_accepted_lines": totals["ai_accepted"],
             "ai_edit_lines": totals["ai_edit"],
             "non_ai_edit_lines": non_ai_code,
             "total_added_lines": totals["total_added"],
@@ -973,6 +987,8 @@ async def repo_stats(
             "ai_lines": ai_lines,
             "human_lines": human_lines,
             "ai_pct": ai_pct,
+            "mixed_added_lines": totals["mixed_added"],
+            "ai_accepted_lines": totals["ai_accepted"],
             "total_added_lines": totals["total_added"],
             "total_deleted_lines": totals["total_deleted"],
             "total_edit_lines": totals["total_edit"],
