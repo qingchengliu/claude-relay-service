@@ -596,11 +596,11 @@ tbody tr.row:hover td{background:var(--surface-2)}
         </div>
       </div>
       <div class="card">
-        <div class="card-head"><div class="ttl">Agent × 模型 AI 代码占比 <span>按 git 提交中的 AI 采纳行透视</span><i class="tip" data-tip="AI占比=该 Agent/模型的 ai_additions / 其参与提交的 git_diff_added_lines；转化率=ai_additions / total_ai_additions">?</i></div></div>
+        <div class="card-head"><div class="ttl">Agent × 模型 AI 代码占比 <span>按 git 提交中的 AI 采纳行透视</span><i class="tip" data-tip="AI 占比 = ai_additions / git_diff_added_lines；过程采纳率 = ai_additions / total_ai_additions，表示 AI 过程生成新增行最终进入 git commit 的比例。ai_additions 是提交采纳的 AI 新增行，total_ai_additions 是过程中生成过的 AI 新增行。">?</i></div></div>
         <div class="card-body flush"><div class="t-wrap"><table>
           <thead><tr>
             <th>Agent</th><th>模型</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th>
-            <th>转化率</th><th>混合行</th><th>提交</th><th>使用人数</th>
+            <th>过程采纳率</th><th>混合行</th><th>提交</th><th>使用人数</th>
           </tr></thead>
           <tbody id="agentModelBody"></tbody>
         </table></div></div>
@@ -1292,8 +1292,8 @@ async function showUser(id){
       + miniRow('辅助频率' + helpTip('个人提交数 / 团队提交数 * 100%'), d.contribution.sub_scores.frequency, 100)
       + miniRow('活跃度' + helpTip('min(checkpoints / 活跃天数 / 20, 1) * 100%'), d.contribution.sub_scores.activity, 100)
       + '</div></div>'
-      + '<div class="card"><div class="card-head"><div class="ttl">Agent × 模型 AI 代码行 <span>提交到 git 中</span></div></div><div class="card-body flush"><div class="t-wrap"><table class="user-agent-table">'
-      + '<thead><tr><th>Agent</th><th>模型</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th><th>转化率</th><th>混合行</th><th>提交</th></tr></thead><tbody>'
+      + '<div class="card"><div class="card-head"><div class="ttl">Agent × 模型 AI 代码行 <span>提交到 git 中</span>' + helpTip('AI 占比 = ai_additions / git_diff_added_lines；过程采纳率 = ai_additions / total_ai_additions，表示 AI 过程生成新增行最终进入 git commit 的比例。ai_additions 是提交采纳的 AI 新增行，total_ai_additions 是过程中生成过的 AI 新增行。') + '</div></div><div class="card-body flush"><div class="t-wrap"><table class="user-agent-table">'
+      + '<thead><tr><th>Agent</th><th>模型</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th><th>过程采纳率</th><th>混合行</th><th>提交</th></tr></thead><tbody>'
       + (agentModels.map(x => '<tr>'
         + '<td><b>' + esc(x.agent || 'unknown') + '</b></td>'
         + '<td>' + esc(x.model || 'unknown') + '</td>'
