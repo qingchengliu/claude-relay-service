@@ -986,7 +986,7 @@ async def time_distribution(
 
     if member_id and member_id in member_ids:
         query = text("""
-            SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour,
+            SELECT CAST(strftime('%H', datetime(created_at, '+8 hours')) AS INTEGER) as hour,
                    COUNT(*) as events,
                    SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
                    SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
@@ -997,7 +997,7 @@ async def time_distribution(
         result = await db.execute(query, {"mid": member_id, "sd": start_date.isoformat()})
     else:
         query = text("""
-            SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour,
+            SELECT CAST(strftime('%H', datetime(created_at, '+8 hours')) AS INTEGER) as hour,
                    COUNT(*) as events,
                    SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
                    SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
