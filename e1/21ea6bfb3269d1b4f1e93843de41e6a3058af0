@@ -1,0 +1,64 @@
+git-collector/Dockerfile
+  a5289d30c640506c 1-14
+git-collector/requirements.txt
+  a5289d30c640506c 1-5
+git-collector/server/routers/metrics.py
+  a5289d30c640506c 1-140
+git-collector/server/main.py
+  a5289d30c640506c 1-84
+git-collector/frontend/index.html
+  a5289d30c640506c 1-671
+git-collector/server/routers/install.py
+  a5289d30c640506c 1-1086
+git-collector/server/routers/bundles.py
+  a5289d30c640506c 1-65
+git-collector/server/routers/admin.py
+  a5289d30c640506c 1-52
+git-collector/.env.example
+  a5289d30c640506c 1-17
+git-collector/server/config.py
+  a5289d30c640506c 1-38
+git-collector/server/database.py
+  a5289d30c640506c 1-55
+git-collector/frontend/dashboard.html
+  a5289d30c640506c 95-1242
+git-collector/server/models.py
+  a5289d30c640506c 1-84
+git-collector/server/routers/stats.py
+  a5289d30c640506c 2-936
+git-collector/server/auth_deps.py
+  a5289d30c640506c 1-30
+git-collector/.dockerignore
+  a5289d30c640506c 1-9
+git-collector/server/routers/cas.py
+  a5289d30c640506c 1-138
+docker-compose-git.yml
+  a5289d30c640506c 1-32
+git-collector/server/routers/auth.py
+  a5289d30c640506c 1-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e121ea6bfb3269d1b4f1e93843de41e6a3058af0",
+  "prompts": {
+    "a5289d30c640506c": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dd706-d6bb-7e51-bb3c-aeae86394d6c",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 3082,
+      "total_deletions": 214,
+      "accepted_lines": 4685,
+      "overriden_lines": 0,
+      "messages_url": "http://localhost:8000/cas/26676b73542fb108592d63f04f36d8e349106120b9b2f9a9b37632b566fc4856",
+      "custom_attributes": {
+        "team": "风控研发中心",
+        "user": "doveliu"
+      }
+    }
+  }
+}
