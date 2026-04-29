@@ -368,10 +368,10 @@ tbody tr.row:hover td{background:var(--surface-2)}
         <div class="kpi"><div class="head"><span class="ttl-wrap">总编辑行数 <i class="tip" data-tip="SUM(git_diff_added_lines + git_diff_deleted_lines - 整文件删除行)">?</i></span><div class="icon">◉</div></div>
           <div class="val" id="kAdopt">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAdoptD">→</span><span id="kAdoptM">新增 + 删除（不含整文件删除）</span></div>
           <canvas class="spark" id="spkAdopt"></canvas></div>
-        <div class="kpi"><div class="head"><span class="ttl-wrap">AI 编辑行数 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></span><div class="icon">∑</div></div>
-          <div class="val" id="kAcc">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAccD">→</span><span id="kAccM">AI 新增 + AI 删除</span></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">AI 代码行数 <i class="tip" data-tip="SUM(ai_additions)，最终进入 commit 的 AI 代码行">?</i></span><div class="icon">∑</div></div>
+          <div class="val" id="kAcc">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAccD">→</span><span id="kAccM">最终 AI 新增</span></div>
           <canvas class="spark" id="spkAcc"></canvas></div>
-        <div class="kpi"><div class="head"><span class="ttl-wrap">AI 代码占比 <i class="tip" data-tip="AI 编辑行数 / 总编辑行数 * 100%">?</i></span><div class="icon">⌬</div></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">AI 代码占比 <i class="tip" data-tip="AI 代码行数 / git_diff_added_lines * 100%">?</i></span><div class="icon">⌬</div></div>
           <div class="val" id="kSurv">0%</div><div class="meta"><span class="delta flat" id="kSurvD">→</span><span id="kSurvM">AI / Total</span></div>
           <canvas class="spark" id="spkSurv"></canvas></div>
         <div class="kpi"><div class="head"><span class="ttl-wrap">Agent 编辑次数 <i class="tip" data-tip="COUNT(event_type=4 AND kind IN ('ai_agent','ai_tab'))">?</i></span><div class="icon">⇡</div></div>
@@ -449,16 +449,16 @@ tbody tr.row:hover td{background:var(--surface-2)}
       <!-- Trend + leaderboard preview -->
       <div class="grid-asym-2">
         <div class="card">
-          <div class="card-head"><div class="ttl">成员 AI 代码排名 <span>本期 AI 编辑行 Top 8</span><i class="tip" data-tip="按 AI 编辑行数降序排序">?</i></div>
+          <div class="card-head"><div class="ttl">成员 AI 代码排名 <span>本期 AI 代码行 Top 8</span><i class="tip" data-tip="按最终进入 commit 的 AI 代码行数降序排序">?</i></div>
             <div class="actions"><button class="iconbtn" onclick="showTab('people')" title="查看全部" style="font-size:11px;width:auto;padding:0 10px;height:28px">查看全部 →</button></div>
           </div>
           <div class="card-body flush"><div class="t-wrap"><table>
-            <thead><tr><th style="width:36px">#</th><th>成员</th><th>AI 编辑行</th><th>总编辑行</th><th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th></tr></thead>
+            <thead><tr><th style="width:36px">#</th><th>成员</th><th>AI 代码行</th><th>新增代码行</th><th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th></tr></thead>
             <tbody id="topPerformers"></tbody>
           </table></div></div>
         </div>
         <div class="card">
-          <div class="card-head"><div class="ttl">AI / 非 AI 编辑构成 <span>新增 + 删除</span></div></div>
+          <div class="card-head"><div class="ttl">AI / 非 AI 代码构成 <span>最终新增代码</span></div></div>
           <div class="chart-wrap"><canvas id="linesChart"></canvas></div>
         </div>
       </div>
@@ -466,7 +466,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
       <!-- AI code trend -->
       <div class="card">
         <div class="card-head">
-          <div class="ttl">AI 代码占比趋势 <span>AI 编辑 · 非 AI 编辑 · 占比 · 提交</span></div>
+          <div class="ttl">AI 代码占比趋势 <span>AI 代码 · 非 AI 代码 · 占比 · 提交</span></div>
           <div class="actions">
             <select class="select" id="effUser" onchange="refreshEfficiency()" style="height:30px;font-size:11.5px">
               <option value="">全员汇总</option>
@@ -499,15 +499,15 @@ tbody tr.row:hover td{background:var(--surface-2)}
 
       <div class="card">
         <div class="card-head">
-          <div class="ttl">成员 AI 代码排名 <span>点击查看个人详情</span><i class="tip" data-tip="按 AI 编辑行数降序排序">?</i></div>
+          <div class="ttl">成员 AI 代码排名 <span>点击查看个人详情</span><i class="tip" data-tip="按最终进入 commit 的 AI 代码行数降序排序">?</i></div>
           <div class="actions">
             <input id="memberSearch" oninput="filterMembers()" placeholder="搜索成员..." style="height:30px;width:200px;padding:0 12px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;outline:none;font-size:12.5px">
           </div>
         </div>
         <div class="card-body flush"><div class="t-wrap"><table>
           <thead><tr>
-            <th style="width:36px">#</th><th>成员</th><th>AI 编辑行 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></th><th>总编辑行 <i class="tip" data-tip="新增行 + 删除行，排除整文件删除行">?</i></th>
-            <th>AI 占比 <i class="tip" data-tip="AI 编辑行数 / 总编辑行数 * 100%">?</i></th><th>提交</th>
+            <th style="width:36px">#</th><th>成员</th><th>AI 代码行 <i class="tip" data-tip="SUM(ai_additions)，最终进入 commit 的 AI 代码行">?</i></th><th>新增代码行 <i class="tip" data-tip="SUM(git_diff_added_lines)">?</i></th>
+            <th>AI 占比 <i class="tip" data-tip="AI 代码行数 / git_diff_added_lines * 100%">?</i></th><th>提交</th>
             <th>Agent 编辑</th><th>Prompt <i class="tip" data-tip="COUNT(CAS/Bundle messages WHERE role='user')">?</i></th><th>偏好模型 <i class="tip" data-tip="COUNT(DISTINCT model)">?</i></th><th>偏好 Agent</th>
           </tr></thead>
           <tbody id="rankingBody"></tbody>
@@ -539,10 +539,10 @@ tbody tr.row:hover td{background:var(--surface-2)}
     <!-- ─── REPOS ────────────────────────────────────────── -->
     <section id="repos" class="section">
       <div class="card">
-        <div class="card-head"><div class="ttl">仓库 AI 代码排名 <span>按 AI 编辑行排序</span></div></div>
+        <div class="card-head"><div class="ttl">仓库 AI 代码排名 <span>按 AI 代码行排序</span></div></div>
         <div class="card-body flush"><div class="t-wrap"><table>
           <thead><tr>
-            <th>仓库</th><th>提交</th><th>贡献者</th><th>总编辑行</th><th>AI 编辑行</th>
+            <th>仓库</th><th>提交</th><th>贡献者</th><th>新增代码行</th><th>AI 代码行</th>
             <th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th><th>Top 贡献者</th><th>最近活跃</th>
           </tr></thead>
           <tbody id="repoBody"></tbody>
@@ -799,10 +799,10 @@ function renderBanner(d, trend, models){
   $('kAdoptM').textContent = '新增 ' + fmt(d.total_added_lines || 0) + ' / 删除 ' + fmt(d.total_deleted_lines || 0);
 
   $('kAcc').innerHTML = fmt(d.ai_edit_lines || 0) + '<small>行</small>';
-  $('kAccM').textContent = '新增 ' + fmt(d.total_ai_lines || 0) + ' / 删除 ' + fmt(d.total_ai_deleted || 0);
+  $('kAccM').textContent = '最终新增 ' + fmt(d.total_ai_lines || 0) + ' / 过程 ' + fmt(d.ai_activity_lines || 0);
 
   $('kSurv').textContent = pct(d.ai_code_pct || 0);
-  $('kSurvM').textContent = fmt(d.ai_edit_lines || 0) + ' / ' + fmt(d.total_edit_lines || 0);
+  $('kSurvM').textContent = fmt(d.ai_edit_lines || 0) + ' / ' + fmt(d.total_added_lines || 0);
 
   $('kThru').innerHTML = fmt(d.agent_edit_count || 0) + '<small>次</small>';
   $('kThruM').textContent = 'AI checkpoint';
@@ -995,7 +995,7 @@ function renderTopPerformers(rank){
       + '<td><div class="member-cell"><div class="avatar" style="background:' + avatarColor(u.name) + '">' + initials(u.name) + '</div>'
       + '<div><div class="name">' + esc(u.name) + '</div><div class="id">' + esc(u.distinct_id || '') + '</div></div></div></td>'
       + '<td><b class="tabular">' + fmt(u.ai_edit_lines || 0) + '</b></td>'
-      + '<td class="tabular">' + fmt(u.total_edit_lines || 0) + '</td>'
+      + '<td class="tabular">' + fmt(u.total_added_lines || 0) + '</td>'
       + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(u.ai_code_pct || u.ai_pct || 0, 100) + '%"></i></div><span class="num">' + pct(u.ai_code_pct || u.ai_pct || 0) + '</span></div></td>'
       + '<td class="tabular">' + (u.edits || 0) + '</td>'
       + '<td class="tabular">' + fmt(u.prompt_message_count || 0) + '</td></tr>';
@@ -1022,7 +1022,7 @@ function renderRanking(rank){
       + '<td><div class="member-cell"><div class="avatar" style="background:' + avatarColor(u.name) + '">' + initials(u.name) + '</div>'
       + '<div><div class="name">' + esc(u.name) + '</div><div class="id">' + esc(u.distinct_id || '') + '</div></div></div></td>'
       + '<td><b class="tabular">' + fmt(u.ai_edit_lines || 0) + '</b></td>'
-      + '<td class="tabular">' + fmt(u.total_edit_lines || 0) + '</td>'
+      + '<td class="tabular">' + fmt(u.total_added_lines || 0) + '</td>'
       + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(u.ai_code_pct || u.ai_pct || 0, 100) + '%"></i></div><span class="num">' + pct(u.ai_code_pct || u.ai_pct || 0) + '</span></div></td>'
       + '<td class="tabular">' + (u.commits || 0) + '</td>'
       + '<td class="tabular">' + (u.edits || 0) + '</td>'
@@ -1041,12 +1041,12 @@ function filterMembers(){
 /* ─── Other charts ─────────────────────────────────────────── */
 function renderLines(d){
   const t = chartTheme();
-  const nonAiEdit = Math.max(0, (d.total_edit_lines || 0) - (d.ai_edit_lines || 0));
+  const nonAiCode = Math.max(0, (d.total_added_lines || 0) - (d.ai_edit_lines || 0));
   buildChart('linesChart', 'bar', {
     labels: ['代码行'],
     datasets: [
-      { label: '非 AI 编辑', data: [nonAiEdit], backgroundColor: '#5b8def', borderRadius: 8, barThickness: 60, stack: 's1' },
-      { label: 'AI 编辑', data: [d.ai_edit_lines || 0], backgroundColor: '#3fb950', borderRadius: 8, barThickness: 60, stack: 's1' }
+      { label: '非 AI 代码', data: [nonAiCode], backgroundColor: '#5b8def', borderRadius: 8, barThickness: 60, stack: 's1' },
+      { label: 'AI 代码', data: [d.ai_edit_lines || 0], backgroundColor: '#3fb950', borderRadius: 8, barThickness: 60, stack: 's1' }
     ]
   }, {
     indexAxis: 'y',
@@ -1060,8 +1060,8 @@ function renderEfficiency(d){
   buildChart('effChart', 'line', {
     labels: trend.map(x => x.date),
     datasets: [
-      { type: 'bar', label: 'AI 编辑行', data: trend.map(x => x.ai_edit_lines || x.ai_added_lines || 0), backgroundColor: 'rgba(63,185,80,.55)', borderRadius: 4, stack: 'edit', order: 3 },
-      { type: 'bar', label: '非 AI 编辑行', data: trend.map(x => x.non_ai_edit_lines || x.non_ai_added_lines || 0), backgroundColor: 'rgba(91,141,239,.35)', borderRadius: 4, stack: 'edit', order: 4 },
+      { type: 'bar', label: 'AI 代码行', data: trend.map(x => x.ai_edit_lines || x.ai_added_lines || 0), backgroundColor: 'rgba(63,185,80,.55)', borderRadius: 4, stack: 'edit', order: 3 },
+      { type: 'bar', label: '非 AI 代码行', data: trend.map(x => x.non_ai_edit_lines || x.non_ai_added_lines || 0), backgroundColor: 'rgba(91,141,239,.35)', borderRadius: 4, stack: 'edit', order: 4 },
       { type: 'line', label: 'AI 占比 %', yAxisID: 'y2', data: trend.map(x => x.ai_code_pct || 0), borderColor: '#d29922', tension: .35, pointRadius: 0, borderWidth: 2.5, order: 1 },
       { type: 'line', label: '提交次数', yAxisID: 'y3', data: trend.map(x => x.commit_count || 0), borderColor: '#39c5bb', tension: .35, pointRadius: 0, borderWidth: 2, borderDash: [4,4], order: 2 }
     ]
@@ -1069,7 +1069,7 @@ function renderEfficiency(d){
     interaction: { mode: 'index', intersect: false },
     scales: {
       x: { grid: { display: false } },
-      y: { stacked: true, position: 'left', grid: { color: t.grid }, title: { display: true, text: '编辑行', color: t.muted, font: { size: 11 } } },
+      y: { stacked: true, position: 'left', grid: { color: t.grid }, title: { display: true, text: '代码行', color: t.muted, font: { size: 11 } } },
       y2: { position: 'right', grid: { display: false }, title: { display: true, text: 'AI 占比 %', color: t.muted, font: { size: 11 } }, beginAtZero: true, max: 100 },
       y3: { display: false, beginAtZero: true }
     },
@@ -1107,7 +1107,7 @@ function renderRepos(d){
     return '<tr><td><b>' + esc(x.repo_name || x.repo_url || '-') + '</b><div style="font-size:11px;color:var(--muted);margin-top:3px">' + esc((x.repo_url || '').replace(/.*[\/:]/, '').slice(0, 50)) + '</div></td>'
       + '<td class="tabular">' + (x.commit_count || 0) + '</td>'
       + '<td class="tabular">' + (x.contributor_count || 0) + '</td>'
-      + '<td class="tabular">' + fmt(x.total_edit_lines || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.total_added_lines || 0) + '</td>'
       + '<td class="tabular">' + fmt(x.ai_edit_lines || 0) + '</td>'
       + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(x.ai_pct, 100) + '%"></i></div><span class="num">' + pct(x.ai_pct) + '</span></div></td>'
       + '<td class="tabular">' + (x.edit_count || 0) + '</td>'
@@ -1200,7 +1200,7 @@ async function showUser(id){
       + '<div class="modal-body">'
       + '<div class="grid-3" style="margin-bottom:18px">'
       + kpiCard('评分' + helpTip('评分 = 代码量*50% + 辅助频率*30% + 活跃度*20%'), d.contribution.score, '<span class="lvl-tag lvl-' + d.contribution.level + '">' + d.contribution.level + '</span> 等级' + helpTip('S>=80；A>=60；B>=40；C>=20；D<20'))
-      + kpiCard('AI 编辑行', fmt(d.ai_edit_lines || 0), '占比 ' + pct(acc) + ' · 总编辑 ' + fmt(d.total_edit_lines || 0))
+      + kpiCard('AI 代码行', fmt(d.ai_edit_lines || 0), '占比 ' + pct(acc) + ' · 新增代码 ' + fmt(d.total_added_lines || 0))
       + kpiCard('提交 / Agent 编辑', d.commit_count + ' / ' + d.edit_count, 'Prompt ' + fmt(d.prompt_message_count || 0) + ' 条 · 模型 ' + ((d.models || []).length) + ' 个' + helpTip('COUNT(DISTINCT model)'))
       + '</div>'
       + '<div class="grid-2" style="margin-bottom:18px">'

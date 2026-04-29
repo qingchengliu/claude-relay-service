@@ -67,12 +67,15 @@ def _deleted_file_lines(value) -> int:
 def _commit_metrics(evt_data: dict) -> dict:
     if not isinstance(evt_data, dict):
         return {
-            "ai_added": 0, "ai_deleted": 0, "human_added": 0,
+            "ai_added": 0, "ai_deleted": 0, "ai_activity_added": 0,
+            "ai_activity_deleted": 0, "ai_activity": 0, "human_added": 0,
             "total_added": 0, "total_deleted": 0, "total_edit": 0,
             "ai_edit": 0, "non_ai_added": 0,
         }
-    ai_added = _metric_total(evt_data.get("total_ai_additions")) or _metric_total(evt_data.get("ai_additions"))
-    ai_deleted = _metric_total(evt_data.get("total_ai_deletions"))
+    # ai_additions 是最终进入 commit 的 AI 代码；total_ai_* 是过程活动量，不能用于代码占比。
+    ai_added = _metric_total(evt_data.get("ai_additions"))
+    activity_ai_added = _metric_total(evt_data.get("total_ai_additions")) or ai_added
+    activity_ai_deleted = _metric_total(evt_data.get("total_ai_deletions"))
     human_added = _metric_total(evt_data.get("human_additions"))
     raw_added = _metric_total(evt_data.get("git_diff_added_lines"))
     total_added = raw_added if raw_added > 0 or "git_diff_added_lines" in evt_data else ai_added + human_added
@@ -89,19 +92,23 @@ def _commit_metrics(evt_data: dict) -> dict:
     total_deleted = raw_deleted - min(raw_deleted, deleted_file_lines)
     return {
         "ai_added": ai_added,
-        "ai_deleted": ai_deleted,
+        "ai_deleted": activity_ai_deleted,
+        "ai_activity_added": activity_ai_added,
+        "ai_activity_deleted": activity_ai_deleted,
+        "ai_activity": activity_ai_added + activity_ai_deleted,
         "human_added": human_added,
         "total_added": total_added,
         "total_deleted": total_deleted,
         "total_edit": total_added + total_deleted,
-        "ai_edit": ai_added + ai_deleted,
+        "ai_edit": ai_added,
         "non_ai_added": max(0, total_added - ai_added),
     }
 
 
 def _aggregate_commits(committed: list[tuple]) -> dict:
     totals = {
-        "ai_added": 0, "ai_deleted": 0, "human_added": 0,
+        "ai_added": 0, "ai_deleted": 0, "ai_activity_added": 0,
+        "ai_activity_deleted": 0, "ai_activity": 0, "human_added": 0,
         "total_added": 0, "total_deleted": 0, "total_edit": 0,
         "ai_edit": 0, "non_ai_added": 0,
     }
@@ -109,7 +116,7 @@ def _aggregate_commits(committed: list[tuple]) -> dict:
         cm = _commit_metrics(evt_data)
         for key in totals:
             totals[key] += cm[key]
-    totals["ai_code_pct"] = round(totals["ai_edit"] / totals["total_edit"] * 100, 1) if totals["total_edit"] > 0 else 0
+    totals["ai_code_pct"] = min(100, round(totals["ai_added"] / totals["total_added"] * 100, 1)) if totals["total_added"] > 0 else 0
     totals["ai_added_pct"] = round(totals["ai_added"] / totals["total_added"] * 100, 1) if totals["total_added"] > 0 else 0
     return totals
 
@@ -268,6 +275,9 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
         "ai_acceptance_rate": acc_rate,
         "total_ai_lines": ai_lines, "total_human_lines": human,
         "total_ai_deleted": ai_del,
+        "ai_activity_lines": commit_totals["ai_activity"],
+        "ai_activity_added": commit_totals["ai_activity_added"],
+        "ai_activity_deleted": commit_totals["ai_activity_deleted"],
         "total_added_lines": commit_totals["total_added"],
         "total_deleted_lines": commit_totals["total_deleted"],
         "total_edit_lines": commit_totals["total_edit"],
@@ -404,7 +414,7 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
         .order_by(func.count(MetricEvent.id).desc()).limit(8))
     models = [{"name": a[0] or "unknown", "count": a[1]} for a in result.all()]
 
-    total_lines = ai_lines + human
+    total_lines = commit_totals["total_added"]
     ai_pct = commit_totals["ai_code_pct"]
     prompt_message_count = await _prompt_count_for_member(db, m.id, since)
     contribution = calc_score(ai_lines, total_lines, commit_count, team_commit_count,
@@ -417,8 +427,11 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
         "agent_usage_count": agent_usage_count, "repo_count": repo_count,
         "active_days": active_days, "active_7d": active_7d > 0,
         "ai_lines": ai_lines, "human_lines": human, "ai_deleted": ai_del, "ai_pct": ai_pct,
+        "total_added_lines": commit_totals["total_added"],
+        "total_deleted_lines": commit_totals["total_deleted"],
         "total_edit_lines": commit_totals["total_edit"],
         "ai_edit_lines": commit_totals["ai_edit"],
+        "ai_activity_lines": commit_totals["ai_activity"],
         "ai_code_pct": commit_totals["ai_code_pct"],
         "prompt_message_count": prompt_message_count,
         "last_active": last_active.isoformat() if last_active else None,
@@ -489,8 +502,11 @@ async def ranking(
             "contribution": detail["contribution"],
             "ai_lines": detail["ai_lines"], "human_lines": detail["human_lines"],
             "ai_deleted": detail["ai_deleted"], "ai_pct": detail["ai_pct"],
+            "total_added_lines": detail["total_added_lines"],
+            "total_deleted_lines": detail["total_deleted_lines"],
             "total_edit_lines": detail["total_edit_lines"],
             "ai_edit_lines": detail["ai_edit_lines"],
+            "ai_activity_lines": detail["ai_activity_lines"],
             "ai_code_pct": detail["ai_code_pct"],
             "prompt_message_count": detail["prompt_message_count"],
             "commits": detail["commit_count"], "edits": detail["edit_count"],
@@ -499,7 +515,7 @@ async def ranking(
             "models_used": len(detail["models"]),
         })
 
-    ranking_list.sort(key=lambda x: (x["ai_edit_lines"], x["ai_code_pct"], x["commits"]), reverse=True)
+    ranking_list.sort(key=lambda x: (x["ai_lines"], x["ai_code_pct"], x["commits"]), reverse=True)
     for i, item in enumerate(ranking_list): item["rank"] = i + 1
 
     return {"ranking": ranking_list, "total": len(ranking_list)}
@@ -816,14 +832,15 @@ async def ai_code_trend(
     trend = []
     for day in sorted(daily.keys()):
         totals = _aggregate_commits(daily[day])
-        non_ai_edit = max(0, totals["total_edit"] - totals["ai_edit"])
+        non_ai_code = max(0, totals["total_added"] - totals["ai_added"])
         trend.append({
             "date": day,
             "ai_added_lines": totals["ai_added"],
             "non_ai_added_lines": totals["non_ai_added"],
             "ai_deleted_lines": totals["ai_deleted"],
             "ai_edit_lines": totals["ai_edit"],
-            "non_ai_edit_lines": non_ai_edit,
+            "non_ai_edit_lines": non_ai_code,
+            "total_added_lines": totals["total_added"],
             "total_edit_lines": totals["total_edit"],
             "ai_code_pct": totals["ai_code_pct"],
             "commit_count": len(daily[day]),
@@ -956,14 +973,17 @@ async def repo_stats(
             "ai_lines": ai_lines,
             "human_lines": human_lines,
             "ai_pct": ai_pct,
+            "total_added_lines": totals["total_added"],
+            "total_deleted_lines": totals["total_deleted"],
             "total_edit_lines": totals["total_edit"],
             "ai_edit_lines": totals["ai_edit"],
+            "ai_activity_lines": totals["ai_activity"],
             "prompt_message_count": prompt_message_count,
             "top_contributors": top_contributors,
             "last_activity": str(last_act) if last_act else None,
         })
 
-    repos_list.sort(key=lambda x: (x["ai_edit_lines"], x["ai_pct"], x["commit_count"]), reverse=True)
+    repos_list.sort(key=lambda x: (x["ai_lines"], x["ai_pct"], x["commit_count"]), reverse=True)
     return {"repos": repos_list}
 
 
