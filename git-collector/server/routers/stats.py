@@ -1,0 +1,1083 @@
+from datetime import datetime, timezone, timedelta
+from pathlib import PurePosixPath, PureWindowsPath
+from fastapi import APIRouter, Depends, Header, Query
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select, func
+from sqlalchemy.sql import text
+from ..database import get_db
+from ..models import Team, Member, MetricEvent, CasObject, Bundle
+
+router = APIRouter(prefix="/api/stats", tags=["stats"])
+
+# ============================================================
+#  AI 贡献度评分: 代码量(40%) + 辅助频率(25%) + 代码留存率(20%) + 活跃度(15%)
+# ============================================================
+
+
+async def get_team(db: AsyncSession, api_key: str | None) -> Team | None:
+    if api_key:
+        result = await db.execute(select(Team).where(Team.api_key == api_key))
+        team = result.scalar_one_or_none()
+        if team: return team
+    result = await db.execute(select(Team).limit(1))
+    return result.scalar_one_or_none()
+
+
+async def get_member_ids(db: AsyncSession, team_id: str) -> list[str]:
+    result = await db.execute(select(Member.id).where(Member.team_id == team_id))
+    return [r[0] for r in result.all()]
+
+
+AI_KINDS = {"ai_agent", "ai_tab"}
+
+
+def _sum_num(value) -> int:
+    if isinstance(value, list):
+        return sum(_sum_num(v) for v in value)
+    if isinstance(value, (int, float)):
+        return int(value)
+    return 0
+
+
+def _commit_metrics(evt_data: dict) -> dict:
+    if not isinstance(evt_data, dict):
+        return {
+            "ai_added": 0, "ai_deleted": 0, "human_added": 0,
+            "total_added": 0, "total_deleted": 0, "total_edit": 0,
+            "ai_edit": 0, "non_ai_added": 0, "human_deleted": 0, "wait": 0,
+        }
+    ai_added = _sum_num(evt_data.get("total_ai_additions")) or _sum_num(evt_data.get("ai_additions"))
+    ai_deleted = _sum_num(evt_data.get("total_ai_deletions"))
+    human_added = _sum_num(evt_data.get("human_additions"))
+    total_added = max(_sum_num(evt_data.get("git_diff_added_lines")), ai_added + human_added)
+    total_deleted = max(_sum_num(evt_data.get("git_diff_deleted_lines")), ai_deleted)
+    return {
+        "ai_added": ai_added,
+        "ai_deleted": ai_deleted,
+        "human_added": human_added,
+        "total_added": total_added,
+        "total_deleted": total_deleted,
+        "total_edit": total_added + total_deleted,
+        "ai_edit": ai_added + ai_deleted,
+        "non_ai_added": max(0, total_added - ai_added),
+        "human_deleted": max(0, total_deleted - ai_deleted),
+        "wait": _sum_num(evt_data.get("time_waiting_for_ai")),
+    }
+
+
+def _aggregate_commits(committed: list[tuple]) -> dict:
+    totals = {
+        "ai_added": 0, "ai_deleted": 0, "human_added": 0,
+        "total_added": 0, "total_deleted": 0, "total_edit": 0,
+        "ai_edit": 0, "non_ai_added": 0, "human_deleted": 0, "wait": 0,
+    }
+    for (evt_data,) in committed:
+        cm = _commit_metrics(evt_data)
+        for key in totals:
+            totals[key] += cm[key]
+    totals["ai_code_pct"] = round(totals["ai_edit"] / totals["total_edit"] * 100, 1) if totals["total_edit"] > 0 else 0
+    totals["ai_added_pct"] = round(totals["ai_added"] / totals["total_added"] * 100, 1) if totals["total_added"] > 0 else 0
+    totals["survival_rate"] = round(max(0, totals["ai_added"] - totals["human_deleted"]) / totals["ai_added"] * 100, 1) if totals["ai_added"] > 0 else 0
+    return totals
+
+
+def _parse_committed(committed: list[tuple]) -> tuple[int, int, int, int]:
+    """返回: (AI新增行, AI删除行, 人工新增行, 等待毫秒)"""
+    totals = _aggregate_commits(committed)
+    return totals["ai_added"], totals["ai_deleted"], totals["human_added"], totals["wait"]
+
+
+def _prompt_user_message_count(payload) -> int:
+    if isinstance(payload, list):
+        return sum(_prompt_user_message_count(item) for item in payload)
+    if not isinstance(payload, dict):
+        return 0
+    count = 0
+    messages = payload.get("messages")
+    if isinstance(messages, list):
+        for msg in messages:
+            if not isinstance(msg, dict):
+                continue
+            role = str(msg.get("role") or msg.get("type") or msg.get("author") or "").lower()
+            if role in {"user", "human"}:
+                count += 1
+    for key, value in payload.items():
+        if key != "messages":
+            count += _prompt_user_message_count(value)
+    return count
+
+
+async def _prompt_count_for_members(db: AsyncSession, member_ids: list[str], since: datetime | None = None) -> int:
+    if not member_ids:
+        return 0
+    cas_conds = [CasObject.member_id.in_(member_ids)]
+    bundle_conds = [Bundle.member_id.in_(member_ids)]
+    if since:
+        cas_conds.append(CasObject.created_at >= since)
+        bundle_conds.append(Bundle.created_at >= since)
+    cas_result = await db.execute(select(CasObject.content).where(*cas_conds))
+    bundle_result = await db.execute(select(Bundle.data).where(*bundle_conds))
+    return sum(_prompt_user_message_count(r[0]) for r in cas_result.all()) + \
+        sum(_prompt_user_message_count(r[0]) for r in bundle_result.all())
+
+
+async def _prompt_count_for_member(db: AsyncSession, member_id: str, since: datetime | None = None) -> int:
+    return await _prompt_count_for_members(db, [member_id], since)
+
+
+def _file_ext(path: str | None) -> str:
+    if not path:
+        return "[none]"
+    normalized = str(path).replace("\\", "/")
+    suffix = PurePosixPath(normalized).suffix or PureWindowsPath(path).suffix
+    return suffix.lower() if suffix else "[none]"
+
+
+def calc_score(ai_lines: int, total_lines: int, commits: int, total_commits: int,
+                human_deleted: int, checkpoints: int, active_days: int) -> dict:
+    vol = (ai_lines / total_lines * 100) if total_lines > 0 else 0
+    freq = (commits / total_commits * 100) if total_commits > 0 else 0
+    surv = (max(0, ai_lines - human_deleted) / ai_lines * 100) if ai_lines > 0 else 0
+    act = min(checkpoints / max(1, active_days) / 20, 1) * 100
+    score = vol * 0.40 + freq * 0.25 + surv * 0.20 + act * 0.15
+    lv = "S" if score >= 80 else "A" if score >= 60 else "B" if score >= 40 else "C" if score >= 20 else "D"
+    return {"score": round(score, 1), "level": lv,
+            "sub_scores": {"volume": round(vol, 1), "frequency": round(freq, 1),
+                           "survival": round(surv, 1), "activity": round(act, 1)}}
+
+
+
+# ============================================================
+#  /overview
+# ============================================================
+@router.get("/overview")
+async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+    team = await get_team(db, api_key)
+    if not team:
+        return {"member_count": 0, "total_commits": 0, "total_events": 0,
+                "ai_acceptance_rate": 0, "ai_survival_rate": 0, "total_ai_lines": 0,
+                "total_human_lines": 0, "total_ai_deleted": 0, "active_users_7d": 0,
+                "active_users_30d": 0, "team_ai_score": 0, "trend": "stable",
+                "total_edit_count": 0, "total_cas": 0, "total_bundles": 0,
+                "avg_ai_lines_per_commit": 0, "avg_wait_time_ms": 0, "total_wait_time_ms": 0,
+                "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
+                "agent_edit_count": 0, "prompt_message_count": 0, "human_deleted_lines": 0}
+
+    member_ids = await get_member_ids(db, team.id)
+    total_cas = await db.scalar(select(func.count(CasObject.id))) or 0
+    total_bundles = await db.scalar(select(func.count(Bundle.id))) or 0
+
+    if not member_ids:
+        return {"member_count": 0, "total_commits": 0, "total_events": 0,
+                "ai_acceptance_rate": 0, "ai_survival_rate": 0, "total_ai_lines": 0,
+                "total_human_lines": 0, "total_ai_deleted": 0, "active_users_7d": 0,
+                "active_users_30d": 0, "team_ai_score": 0, "trend": "stable",
+                "total_edit_count": 0, "total_cas": total_cas, "total_bundles": total_bundles,
+                "avg_ai_lines_per_commit": 0, "avg_wait_time_ms": 0, "total_wait_time_ms": 0,
+                "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
+                "agent_edit_count": 0, "prompt_message_count": 0, "human_deleted_lines": 0}
+
+    total_events = await db.scalar(
+        select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids))) or 0
+    # Committed events
+    result = await db.execute(
+        select(MetricEvent.event_data).where(MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 1))
+    committed = [(evt_data,) for (evt_data,) in result.all()]
+    commit_totals = _aggregate_commits(committed)
+    ai_lines = commit_totals["ai_added"]
+    ai_del = commit_totals["ai_deleted"]
+    human = commit_totals["human_added"]
+    wait = commit_totals["wait"]
+    total_commits = len(committed)
+
+    total_edit_count = await db.scalar(
+        select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 4)) or 0
+    ai_edit_count = await db.scalar(
+        select(func.count(MetricEvent.id)).where(
+            MetricEvent.member_id.in_(member_ids),
+            MetricEvent.event_type == 4,
+            MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS)),
+        )) or 0
+    prompt_message_count = await _prompt_count_for_members(db, member_ids)
+
+    now_ts = datetime.now(timezone.utc)
+    week_ago = now_ts - timedelta(days=7)
+    month_ago = now_ts - timedelta(days=30)
+    active_7d = (await db.execute(
+        select(func.count(func.distinct(MetricEvent.member_id))).where(
+            MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= week_ago))).scalar() or 0
+    active_30d = (await db.execute(
+        select(func.count(func.distinct(MetricEvent.member_id))).where(
+            MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= month_ago))).scalar() or 0
+
+    total_all = ai_lines + human
+    acc_rate = round(ai_lines / total_all * 100, 1) if total_all > 0 else 0
+    surv_rate = commit_totals["survival_rate"]
+
+    team_score = acc_rate * 0.45 + surv_rate * 0.25 + min(active_7d / max(1, len(member_ids)) * 100, 100) * 0.30
+
+    p1_start = week_ago - timedelta(days=7)
+    p1 = (await db.execute(
+        select(func.count(MetricEvent.id)).where(
+            MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= p1_start, MetricEvent.created_at < week_ago))).scalar() or 0
+    p2 = (await db.execute(
+        select(func.count(MetricEvent.id)).where(
+            MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= week_ago))).scalar() or 0
+    if p1 > 0:
+        chg = (p2 - p1) / p1
+        trend = "up" if chg > 0.15 else "down" if chg < -0.15 else "stable"
+    else:
+        trend = "up" if p2 > 0 else "stable"
+
+    return {
+        "member_count": len(member_ids), "total_commits": total_commits,
+        "total_events": total_events, "total_edit_count": total_edit_count,
+        "total_cas": total_cas, "total_bundles": total_bundles,
+        "active_users_7d": active_7d, "active_users_30d": active_30d,
+        "ai_acceptance_rate": acc_rate, "ai_survival_rate": surv_rate,
+        "total_ai_lines": ai_lines, "total_human_lines": human,
+        "total_ai_deleted": ai_del,
+        "total_edit_lines": commit_totals["total_edit"],
+        "ai_edit_lines": commit_totals["ai_edit"],
+        "ai_code_pct": commit_totals["ai_code_pct"],
+        "agent_edit_count": ai_edit_count,
+        "prompt_message_count": prompt_message_count,
+        "human_deleted_lines": commit_totals["human_deleted"],
+        "team_ai_score": round(team_score, 1), "trend": trend,
+        "avg_ai_lines_per_commit": round(ai_lines / total_commits) if total_commits > 0 else 0,
+        "avg_wait_time_ms": round(wait / total_commits) if total_commits > 0 else 0,
+        "total_wait_time_ms": wait,
+    }
+
+
+# ============================================================
+#  /users
+# ============================================================
+@router.get("/users")
+async def users(
+    days: int = Query(default=0, description="0=全部, 1/7/30=筛选周期"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"users": [], "total": 0}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+
+    result = await db.execute(
+        select(Member).where(Member.team_id == team.id).order_by(Member.created_at.desc()).limit(100))
+    members = result.scalars().all()
+
+    users_list = []
+    for m in members:
+        detail = await _build_user_detail(db, m, since)
+        users_list.append(detail)
+
+    return {"users": users_list, "total": len(users_list)}
+
+
+# ============================================================
+#  /user-detail/{member_id}
+# ============================================================
+@router.get("/user-detail/{member_id}")
+async def user_detail(
+    member_id: str,
+    days: int = Query(default=0),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    result = await db.execute(select(Member).where(Member.id == member_id))
+    member = result.scalar_one_or_none()
+    if not member: return {"error": "User not found"}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+    detail = await _build_user_detail(db, member, since)
+    detail["daily"] = await _build_user_daily(db, member.id)
+    detail["model_breakdown"] = await _build_user_models(db, member.id)
+    detail["file_breakdown"] = await _build_user_files(db, member.id)
+    return detail
+
+
+async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None = None) -> dict:
+    now_ts = datetime.now(timezone.utc)
+    week_ago = now_ts - timedelta(days=7)
+
+    # 提交事件 (可选时间过滤)
+    conds = [MetricEvent.member_id == m.id, MetricEvent.event_type == 1]
+    if since: conds.append(MetricEvent.created_at >= since)
+    result = await db.execute(select(MetricEvent.event_data).where(*conds))
+    committed = [(evt_data,) for (evt_data,) in result.all()]
+    commit_totals = _aggregate_commits(committed)
+    ai_lines = commit_totals["ai_added"]
+    ai_del = commit_totals["ai_deleted"]
+    human = commit_totals["human_added"]
+    wait = commit_totals["wait"]
+    commit_count = len(committed)
+    team_commit_conds = [
+        MetricEvent.member_id.in_(select(Member.id).where(Member.team_id == m.team_id)),
+        MetricEvent.event_type == 1,
+    ]
+    if since: team_commit_conds.append(MetricEvent.created_at >= since)
+    team_commit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*team_commit_conds)) or 0
+
+    # Checkpoint (AI 编辑次数)
+    cc = [MetricEvent.member_id == m.id, MetricEvent.event_type == 4]
+    if since: cc.append(MetricEvent.created_at >= since)
+    checkpoint_count = await db.scalar(select(func.count(MetricEvent.id)).where(*cc)) or 0
+    ai_cc = [*cc, MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS))]
+    edit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*ai_cc)) or 0
+
+    # AgentUsage
+    ac = [MetricEvent.member_id == m.id, MetricEvent.event_type == 2]
+    if since: ac.append(MetricEvent.created_at >= since)
+    agent_usage_count = await db.scalar(select(func.count(MetricEvent.id)).where(*ac)) or 0
+
+    # 活跃天数
+    adc = [MetricEvent.member_id == m.id]
+    if since: adc.append(MetricEvent.created_at >= since)
+    active_days = (await db.execute(
+        select(func.count(func.distinct(func.date(MetricEvent.created_at)))).where(*adc))).scalar() or 0
+
+    # 最近活跃
+    last_evt = await db.execute(
+        select(MetricEvent.created_at).where(MetricEvent.member_id == m.id)
+        .order_by(MetricEvent.created_at.desc()).limit(1))
+    last_active = last_evt.scalar_one_or_none()
+
+    # 仓库数
+    rc = [MetricEvent.member_id == m.id, MetricEvent.repo_url.isnot(None)]
+    if since: rc.append(MetricEvent.created_at >= since)
+    repo_count = await db.scalar(
+        select(func.count(func.distinct(MetricEvent.repo_url))).where(*rc)) or 0
+
+    # 7日活跃
+    active_7d = await db.scalar(
+        select(func.count(MetricEvent.id)).where(
+            MetricEvent.member_id == m.id, MetricEvent.created_at >= week_ago)) or 0
+
+    # Agent使用分布
+    agc = [MetricEvent.member_id == m.id, MetricEvent.event_data["tool"].isnot(None)]
+    if since: agc.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.event_data["tool"].as_string(), func.count(MetricEvent.id))
+        .where(*agc)
+        .group_by(MetricEvent.event_data["tool"].as_string())
+        .order_by(func.count(MetricEvent.id).desc()).limit(8))
+    agents = [{"name": a[0] or "unknown", "count": a[1]} for a in result.all()]
+
+    # 模型使用分布
+    mc = [MetricEvent.member_id == m.id, MetricEvent.event_data["model"].isnot(None)]
+    if since: mc.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.event_data["model"].as_string(), func.count(MetricEvent.id))
+        .where(*mc)
+        .group_by(MetricEvent.event_data["model"].as_string())
+        .order_by(func.count(MetricEvent.id).desc()).limit(8))
+    models = [{"name": a[0] or "unknown", "count": a[1]} for a in result.all()]
+
+    total_lines = ai_lines + human
+    ai_pct = commit_totals["ai_code_pct"]
+    prompt_message_count = await _prompt_count_for_member(db, m.id, since)
+    contribution = calc_score(ai_lines, total_lines, commit_count, team_commit_count,
+                              commit_totals["human_deleted"], edit_count, max(1, active_days))
+
+    return {
+        "id": m.id, "name": m.name, "email": m.email, "distinct_id": m.distinct_id,
+        "commit_count": commit_count, "edit_count": edit_count,
+        "checkpoint_count": checkpoint_count,
+        "agent_usage_count": agent_usage_count, "repo_count": repo_count,
+        "active_days": active_days, "active_7d": active_7d > 0,
+        "ai_lines": ai_lines, "human_lines": human, "ai_deleted": ai_del, "ai_pct": ai_pct,
+        "total_edit_lines": commit_totals["total_edit"],
+        "ai_edit_lines": commit_totals["ai_edit"],
+        "ai_code_pct": commit_totals["ai_code_pct"],
+        "human_deleted_lines": commit_totals["human_deleted"],
+        "prompt_message_count": prompt_message_count,
+        "total_wait_time_ms": wait,
+        "last_active": last_active.isoformat() if last_active else None,
+        "created_at": m.created_at.isoformat() if m.created_at else None,
+        "agents": agents, "models": models, "contribution": contribution,
+    }
+
+
+async def _build_user_daily(db: AsyncSession, member_id: str) -> list[dict]:
+    start_date = datetime.now(timezone.utc) - timedelta(days=30)
+    query = text("""
+        SELECT DATE(created_at) as day,
+               COUNT(*) as events,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+        FROM metric_events WHERE member_id = :mid AND created_at >= :sd
+        GROUP BY DATE(created_at) ORDER BY day ASC
+    """)
+    result = await db.execute(query, {"mid": member_id, "sd": start_date.isoformat()})
+    return [{"date": r[0], "events": r[1], "commits": r[2], "edits": r[3]} for r in result.all()]
+
+
+async def _build_user_models(db: AsyncSession, member_id: str) -> list[dict]:
+    query = text("""
+        SELECT json_extract(event_data, '$.model') as m, COUNT(*) as c
+        FROM metric_events WHERE member_id = :mid
+          AND json_extract(event_data, '$.model') IS NOT NULL AND json_extract(event_data, '$.model') != ''
+        GROUP BY m ORDER BY c DESC LIMIT 10
+    """)
+    result = await db.execute(query, {"mid": member_id})
+    return [{"model": r[0] or "unknown", "count": r[1]} for r in result.all()]
+
+
+async def _build_user_files(db: AsyncSession, member_id: str) -> list[dict]:
+    query = text("""
+        SELECT json_extract(event_data, '$.file_path') as fp, COUNT(*) as edits,
+               SUM(CAST(json_extract(event_data, '$.lines_added') AS INTEGER)) as added
+        FROM metric_events WHERE member_id = :mid AND event_type = 4
+          AND json_extract(event_data, '$.file_path') IS NOT NULL
+        GROUP BY fp ORDER BY edits DESC LIMIT 10
+    """)
+    result = await db.execute(query, {"mid": member_id})
+    return [{"file": r[0] or "unknown", "edits": r[1], "lines_added": r[2] or 0} for r in result.all()]
+
+
+# ============================================================
+#  /ranking (支持时间筛选)
+# ============================================================
+@router.get("/ranking")
+async def ranking(
+    days: int = Query(default=0, description="0=全部, 1=当天, 7=7天, 30=30天"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"ranking": []}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+
+    result = await db.execute(select(Member).where(Member.team_id == team.id).limit(100))
+    members = result.scalars().all()
+
+    ranking_list = []
+    for m in members:
+        detail = await _build_user_detail(db, m, since)
+        ranking_list.append({
+            "id": m.id, "name": m.name, "distinct_id": m.distinct_id,
+            "contribution": detail["contribution"],
+            "ai_lines": detail["ai_lines"], "human_lines": detail["human_lines"],
+            "ai_deleted": detail["ai_deleted"], "ai_pct": detail["ai_pct"],
+            "total_edit_lines": detail["total_edit_lines"],
+            "ai_edit_lines": detail["ai_edit_lines"],
+            "ai_code_pct": detail["ai_code_pct"],
+            "human_deleted_lines": detail["human_deleted_lines"],
+            "prompt_message_count": detail["prompt_message_count"],
+            "commits": detail["commit_count"], "edits": detail["edit_count"],
+            "active_days": detail["active_days"],
+            "agents_used": len(detail["agents"]),
+            "models_used": len(detail["models"]),
+        })
+
+    ranking_list.sort(key=lambda x: (x["ai_edit_lines"], x["ai_code_pct"], x["commits"]), reverse=True)
+    for i, item in enumerate(ranking_list): item["rank"] = i + 1
+
+    return {"ranking": ranking_list, "total": len(ranking_list)}
+
+
+# ============================================================
+#  /timeline (支持人员筛选)
+# ============================================================
+@router.get("/timeline")
+async def timeline(
+    days: int = Query(default=30, le=365),
+    member_id: str = Query(default="", description="空=全员"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"timeline": []}
+
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"timeline": []}
+
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    if member_id and member_id in member_ids:
+        # 单用户视图
+        query = text("""
+            SELECT DATE(created_at) as day, COUNT(*) as events,
+                   SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+                   SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+            FROM metric_events WHERE member_id = :mid AND created_at >= :sd
+            GROUP BY DATE(created_at) ORDER BY day ASC
+        """)
+        result = await db.execute(query, {"mid": member_id, "sd": start_date.isoformat()})
+        return {"timeline": [
+            {"date": r[0], "commits": r[2], "edits": r[3], "events": r[1]} for r in result.all()
+        ]}
+
+    # 全员聚合
+    query = text("""
+        SELECT DATE(created_at) as day, COUNT(*) as events,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+               SUM(CASE WHEN event_type = 2 THEN 1 ELSE 0 END) as agent_usages,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits,
+               COUNT(DISTINCT member_id) as unique_users
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND created_at >= :sd GROUP BY DATE(created_at) ORDER BY day ASC
+    """)
+    result = await db.execute(query, {"tid": team.id, "sd": start_date.isoformat()})
+    return {"timeline": [
+        {"date": r[0], "events": r[1], "commits": r[2], "agent_usages": r[3],
+         "edits": r[4], "unique_users": r[5]} for r in result.all()
+    ]}
+
+
+# ============================================================
+#  /agents
+# ============================================================
+@router.get("/agents")
+async def agents(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+    team = await get_team(db, api_key)
+    if not team: return {"agents": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"agents": []}
+
+    query = text("""
+        SELECT json_extract(event_data, '$.tool') as a, COUNT(*) as c,
+               COUNT(DISTINCT member_id) as u
+        FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND json_extract(event_data, '$.tool') IS NOT NULL AND json_extract(event_data, '$.tool') != ''
+        GROUP BY a ORDER BY c DESC LIMIT 20
+    """)
+    result = await db.execute(query, {"tid": team.id})
+    agents_list = []
+    for r in result.all():
+        model_query = text("""
+            SELECT json_extract(event_data, '$.model') as m, COUNT(*) as c
+            FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+              AND json_extract(event_data, '$.tool') = :a
+              AND json_extract(event_data, '$.model') IS NOT NULL
+            GROUP BY m ORDER BY c DESC LIMIT 5
+        """)
+        mr = await db.execute(model_query, {"tid": team.id, "a": r[0]})
+        agents_list.append({
+            "name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2],
+            "models": [{"name": x[0] or "unknown", "count": x[1]} for x in mr.all()],
+        })
+    return {"agents": agents_list}
+
+
+# ============================================================
+#  /models
+# ============================================================
+@router.get("/models")
+async def models(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+    team = await get_team(db, api_key)
+    if not team: return {"models": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"models": []}
+
+    query = text("""
+        SELECT json_extract(event_data, '$.model') as m, COUNT(*) as c,
+               COUNT(DISTINCT member_id) as u
+        FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND json_extract(event_data, '$.model') IS NOT NULL AND json_extract(event_data, '$.model') != ''
+        GROUP BY m ORDER BY c DESC LIMIT 20
+    """)
+    result = await db.execute(query, {"tid": team.id})
+    return {"models": [
+        {"name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2]} for r in result.all()
+    ]}
+
+
+# ============================================================
+#  /repos
+# ============================================================
+@router.get("/repos")
+async def repos(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+    team = await get_team(db, api_key)
+    if not team: return {"repos": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"repos": []}
+
+    query = text("""
+        SELECT repo_url, COUNT(*) as commits,
+               COUNT(DISTINCT member_id) as contributors, MAX(created_at) as last_act,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND repo_url IS NOT NULL AND repo_url != ''
+        GROUP BY repo_url ORDER BY commits DESC LIMIT 20
+    """)
+    result = await db.execute(query, {"tid": team.id})
+    repos_list = []
+    for r in result.all():
+        la = r[3]
+        if hasattr(la, 'isoformat'): la = la.isoformat()
+        repos_list.append({
+            "repo_url": r[0], "commit_count": r[1], "contributor_count": r[2],
+            "last_activity": str(la) if la else None, "edit_count": r[4],
+        })
+    return {"repos": repos_list}
+
+
+# ============================================================
+#  /weekly
+# ============================================================
+@router.get("/weekly")
+async def weekly(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+    team = await get_team(db, api_key)
+    if not team: return {"weeks": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"weeks": []}
+
+    start_date = datetime.now(timezone.utc) - timedelta(weeks=12)
+    query = text("""
+        SELECT strftime('%Y-W%W', created_at) as wk, COUNT(*) as ev,
+               COUNT(DISTINCT member_id) as us,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as cm,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as ed
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND created_at >= :sd GROUP BY wk ORDER BY wk ASC
+    """)
+    result = await db.execute(query, {"tid": team.id, "sd": start_date.isoformat()})
+    return {"weeks": [
+        {"week": r[0], "events": r[1], "unique_users": r[2], "commits": r[3], "edits": r[4]}
+        for r in result.all()
+    ]}
+
+
+# ============================================================
+#  /members - 人员列表 (供下拉筛选)
+# ============================================================
+@router.get("/members")
+async def member_list(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+    team = await get_team(db, api_key)
+    if not team: return {"members": []}
+    result = await db.execute(
+        select(Member.id, Member.name, Member.distinct_id).where(Member.team_id == team.id).order_by(Member.name))
+    return {"members": [{"id": r[0], "name": r[1], "distinct_id": r[2]} for r in result.all()]}
+
+
+# ============================================================
+#  /efficiency-trend  个人/团队效率趋势
+# ============================================================
+@router.get("/efficiency-trend")
+async def efficiency_trend(
+    member_id: str = Query(default="", description="空=团队汇总"),
+    days: int = Query(default=30, le=365),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"trend": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"trend": []}
+
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    if member_id and member_id in member_ids:
+        # ---------- 单人趋势 ----------
+        # 1) 按天查 committed 事件原始数据
+        result = await db.execute(
+            select(func.date(MetricEvent.created_at), MetricEvent.event_data)
+            .where(MetricEvent.member_id == member_id,
+                   MetricEvent.event_type == 1,
+                   MetricEvent.created_at >= start_date)
+            .order_by(MetricEvent.created_at))
+        daily_committed: dict[str, list[dict]] = {}
+        for day, evt_data in result.all():
+            daily_committed.setdefault(str(day), []).append(evt_data)
+
+        # 2) 按天查 edit 计数
+        edit_query = text("""
+            SELECT DATE(created_at) as day, COUNT(*) as edits
+            FROM metric_events WHERE member_id = :mid AND event_type = 4
+              AND created_at >= :sd GROUP BY DATE(created_at)
+        """)
+        edit_result = await db.execute(edit_query, {"mid": member_id, "sd": start_date.isoformat()})
+        daily_edits = {str(r[0]): r[1] for r in edit_result.all()}
+
+        # 3) 汇总
+        all_days = sorted(set(list(daily_committed.keys()) + list(daily_edits.keys())))
+        trend_list = []
+        for day in all_days:
+            committed_list = [(d,) for d in daily_committed.get(day, []) if isinstance(d, dict)]
+            ai_l, _, human_l, wait_ms = _parse_committed(committed_list)
+            total = ai_l + human_l
+            trend_list.append({
+                "date": day,
+                "ai_lines": ai_l,
+                "human_lines": human_l,
+                "ai_pct": round(ai_l / total * 100, 1) if total > 0 else 0,
+                "commits": len(committed_list),
+                "edits": daily_edits.get(day, 0),
+                "wait_ms": wait_ms,
+            })
+        return {"trend": trend_list}
+
+    # ---------- 团队趋势 ----------
+    # 1) 按天查所有 committed 事件原始数据
+    result = await db.execute(
+        select(func.date(MetricEvent.created_at), MetricEvent.event_data, MetricEvent.member_id)
+        .where(MetricEvent.member_id.in_(member_ids),
+               MetricEvent.event_type == 1,
+               MetricEvent.created_at >= start_date)
+        .order_by(MetricEvent.created_at))
+    daily_committed: dict[str, list[dict]] = {}
+    daily_users: dict[str, set] = {}
+    for day, evt_data, mid in result.all():
+        d = str(day)
+        daily_committed.setdefault(d, []).append(evt_data)
+        daily_users.setdefault(d, set()).add(mid)
+
+    # 2) 按天查 edit 计数
+    edit_query = text("""
+        SELECT DATE(created_at) as day, COUNT(*) as edits
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND event_type = 4 AND created_at >= :sd
+        GROUP BY DATE(created_at)
+    """)
+    edit_result = await db.execute(edit_query, {"tid": team.id, "sd": start_date.isoformat()})
+    daily_edits = {str(r[0]): r[1] for r in edit_result.all()}
+
+    # 3) 汇总
+    all_days = sorted(set(list(daily_committed.keys()) + list(daily_edits.keys())))
+    trend_list = []
+    for day in all_days:
+        committed_list = [(d,) for d in daily_committed.get(day, []) if isinstance(d, dict)]
+        ai_l, _, human_l, _ = _parse_committed(committed_list)
+        total = ai_l + human_l
+        trend_list.append({
+            "date": day,
+            "total_ai_lines": ai_l,
+            "total_human_lines": human_l,
+            "avg_ai_pct": round(ai_l / total * 100, 1) if total > 0 else 0,
+            "total_commits": len(committed_list),
+            "total_edits": daily_edits.get(day, 0),
+            "active_users": len(daily_users.get(day, set())),
+        })
+    return {"trend": trend_list}
+
+
+# ============================================================
+#  /ai-code-trend  AI 代码占比趋势
+# ============================================================
+@router.get("/ai-code-trend")
+async def ai_code_trend(
+    member_id: str = Query(default="", description="空=团队汇总"),
+    days: int = Query(default=30, le=365),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"trend": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"trend": []}
+
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    mids = [member_id] if member_id and member_id in member_ids else member_ids
+    result = await db.execute(
+        select(func.date(MetricEvent.created_at), MetricEvent.event_data)
+        .where(MetricEvent.member_id.in_(mids),
+               MetricEvent.event_type == 1,
+               MetricEvent.created_at >= start_date)
+        .order_by(MetricEvent.created_at))
+
+    daily: dict[str, list[tuple]] = {}
+    for day, evt_data in result.all():
+        daily.setdefault(str(day), []).append((evt_data,))
+
+    trend = []
+    for day in sorted(daily.keys()):
+        totals = _aggregate_commits(daily[day])
+        trend.append({
+            "date": day,
+            "ai_added_lines": totals["ai_added"],
+            "non_ai_added_lines": totals["non_ai_added"],
+            "ai_code_pct": totals["ai_added_pct"],
+            "commit_count": len(daily[day]),
+        })
+    return {"trend": trend}
+
+
+# ============================================================
+#  /language-trend  Agent 代码按语言分布趋势
+# ============================================================
+@router.get("/language-trend")
+async def language_trend(
+    days: int = Query(default=30, le=365),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"trend": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"trend": []}
+
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    result = await db.execute(
+        select(func.date(MetricEvent.created_at), MetricEvent.event_data)
+        .where(MetricEvent.member_id.in_(member_ids),
+               MetricEvent.event_type == 4,
+               MetricEvent.created_at >= start_date)
+        .order_by(MetricEvent.created_at))
+
+    buckets: dict[tuple[str, str], dict] = {}
+    for day, evt_data in result.all():
+        if not isinstance(evt_data, dict):
+            continue
+        ext = _file_ext(evt_data.get("file_path"))
+        added = _sum_num(evt_data.get("lines_added_sloc")) or _sum_num(evt_data.get("lines_added"))
+        key = (str(day), ext)
+        bucket = buckets.setdefault(key, {"date": str(day), "extension": ext, "total_added_lines": 0, "ai_added_lines": 0})
+        bucket["total_added_lines"] += added
+        if str(evt_data.get("kind") or "").lower() in AI_KINDS:
+            bucket["ai_added_lines"] += added
+
+    return {"trend": sorted(buckets.values(), key=lambda x: (x["date"], x["extension"]))}
+
+
+# ============================================================
+#  /repo-stats  增强版仓库统计 (含AI贡献度)
+# ============================================================
+@router.get("/repo-stats")
+async def repo_stats(
+    days: int = Query(default=0, description="0=全部, 1/7/30=筛选周期"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"repos": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"repos": []}
+
+    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+
+    # 基本统计: 按仓库聚合 (top 15)
+    base_query = text("""
+        SELECT repo_url,
+               COUNT(*) as total_events,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+               COUNT(DISTINCT member_id) as contributors,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits,
+               MAX(created_at) as last_act
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND repo_url IS NOT NULL AND repo_url != ''
+          AND (:sd IS NULL OR created_at >= :sd)
+        GROUP BY repo_url ORDER BY commits DESC LIMIT 15
+    """)
+    base_result = await db.execute(base_query, {"tid": team.id, "sd": since.isoformat() if since else None})
+    base_rows = base_result.all()
+
+    repos_list = []
+    for r in base_rows:
+        repo_url = r[0]
+        commit_count = r[2]
+        contributor_count = r[3]
+        edit_count = r[4]
+        last_act = r[5]
+        if hasattr(last_act, 'isoformat'):
+            last_act = last_act.isoformat()
+
+        # 提取 repo 名称
+        repo_name = repo_url.rstrip("/").rsplit("/", 1)[-1] if repo_url else "unknown"
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+
+        # 查询该仓库的 committed 事件数据, Python 解析 AI/人类行数
+        commit_conds = [
+            MetricEvent.member_id.in_(member_ids),
+            MetricEvent.event_type == 1,
+            MetricEvent.repo_url == repo_url,
+        ]
+        if since: commit_conds.append(MetricEvent.created_at >= since)
+        committed_result = await db.execute(select(MetricEvent.event_data).where(*commit_conds))
+        committed = [(evt_data,) for (evt_data,) in committed_result.all()]
+        totals = _aggregate_commits(committed)
+        ai_lines = totals["ai_added"]
+        human_lines = totals["human_added"]
+        ai_pct = totals["ai_code_pct"]
+
+        cas_conds = [CasObject.repo_url == repo_url]
+        if since: cas_conds.append(CasObject.created_at >= since)
+        cas_result = await db.execute(select(CasObject.content).where(*cas_conds))
+        prompt_message_count = sum(_prompt_user_message_count(row[0]) for row in cas_result.all())
+
+        # top 3 贡献者
+        top_query = text("""
+            SELECT m.name, COUNT(*) as cnt
+            FROM metric_events me JOIN members m ON me.member_id = m.id
+            WHERE me.repo_url = :repo AND me.event_type = 1
+              AND me.member_id IN (SELECT id FROM members WHERE team_id = :tid)
+              AND (:sd IS NULL OR me.created_at >= :sd)
+            GROUP BY me.member_id ORDER BY cnt DESC LIMIT 3
+        """)
+        top_result = await db.execute(top_query, {"repo": repo_url, "tid": team.id, "sd": since.isoformat() if since else None})
+        top_contributors = [{"name": t[0] or "unknown", "commits": t[1]} for t in top_result.all()]
+
+        repos_list.append({
+            "repo_url": repo_url,
+            "repo_name": repo_name,
+            "commit_count": commit_count,
+            "contributor_count": contributor_count,
+            "edit_count": edit_count,
+            "ai_lines": ai_lines,
+            "human_lines": human_lines,
+            "ai_pct": ai_pct,
+            "total_edit_lines": totals["total_edit"],
+            "ai_edit_lines": totals["ai_edit"],
+            "human_deleted_lines": totals["human_deleted"],
+            "prompt_message_count": prompt_message_count,
+            "top_contributors": top_contributors,
+            "last_activity": str(last_act) if last_act else None,
+        })
+
+    repos_list.sort(key=lambda x: (x["ai_edit_lines"], x["ai_pct"], x["commit_count"]), reverse=True)
+    return {"repos": repos_list}
+
+
+# ============================================================
+#  /time-distribution  24小时活跃度分布
+# ============================================================
+@router.get("/time-distribution")
+async def time_distribution(
+    member_id: str = Query(default="", description="空=全员"),
+    days: int = Query(default=30, le=365),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team: return {"distribution": [], "peak_hours": []}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids: return {"distribution": [], "peak_hours": []}
+
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    if member_id and member_id in member_ids:
+        query = text("""
+            SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour,
+                   COUNT(*) as events,
+                   SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+                   SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+            FROM metric_events
+            WHERE member_id = :mid AND created_at >= :sd
+            GROUP BY hour ORDER BY hour ASC
+        """)
+        result = await db.execute(query, {"mid": member_id, "sd": start_date.isoformat()})
+    else:
+        query = text("""
+            SELECT CAST(strftime('%H', created_at) AS INTEGER) as hour,
+                   COUNT(*) as events,
+                   SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+                   SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+            FROM metric_events
+            WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+              AND created_at >= :sd
+            GROUP BY hour ORDER BY hour ASC
+        """)
+        result = await db.execute(query, {"tid": team.id, "sd": start_date.isoformat()})
+
+    # 构建 0-23 小时完整分布
+    hour_map = {r[0]: {"hour": r[0], "events": r[1], "commits": r[2], "edits": r[3]} for r in result.all()}
+    distribution = []
+    for h in range(24):
+        distribution.append(hour_map.get(h, {"hour": h, "events": 0, "commits": 0, "edits": 0}))
+
+    # 找出最活跃的3个小时
+    sorted_hours = sorted(distribution, key=lambda x: x["events"], reverse=True)
+    peak_hours = [h["hour"] for h in sorted_hours[:3] if h["events"] > 0]
+
+    return {"distribution": distribution, "peak_hours": peak_hours}
+
+
+# ============================================================
+#  /wait-time-analysis  AI等待耗时分析
+# ============================================================
+@router.get("/wait-time-analysis")
+async def wait_time_analysis(
+    days: int = Query(default=30, le=365),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team:
+        return {"by_user": [], "by_model": [], "total_wait_ms": 0, "avg_wait_per_commit_ms": 0}
+    member_ids = await get_member_ids(db, team.id)
+    if not member_ids:
+        return {"by_user": [], "by_model": [], "total_wait_ms": 0, "avg_wait_per_commit_ms": 0}
+
+    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+
+    # 查出所有 committed 事件的原始数据 (含 member_id)
+    result = await db.execute(
+        select(MetricEvent.member_id, MetricEvent.event_data)
+        .where(MetricEvent.member_id.in_(member_ids),
+               MetricEvent.event_type == 1,
+               MetricEvent.created_at >= start_date))
+
+    # 按 member 和 model 分别聚合
+    user_agg: dict[str, dict] = {}   # member_id -> {wait, count}
+    model_agg: dict[str, dict] = {}  # model -> {wait, count}
+    total_wait = 0
+    total_commits = 0
+
+    for mid, evt_data in result.all():
+        if not isinstance(evt_data, dict):
+            continue
+
+        wt_raw = evt_data.get("time_waiting_for_ai") or []
+        wt = sum(wt_raw) if isinstance(wt_raw, list) else (wt_raw if isinstance(wt_raw, (int, float)) else 0)
+
+        total_wait += wt
+        total_commits += 1
+
+        # 按用户聚合
+        if mid not in user_agg:
+            user_agg[mid] = {"total_wait_ms": 0, "commit_count": 0}
+        user_agg[mid]["total_wait_ms"] += wt
+        user_agg[mid]["commit_count"] += 1
+
+        # 按模型聚合
+        model = evt_data.get("model") or "unknown"
+        if model not in model_agg:
+            model_agg[model] = {"total_wait_ms": 0, "usage_count": 0}
+        model_agg[model]["total_wait_ms"] += wt
+        model_agg[model]["usage_count"] += 1
+
+    # 查询 member 名称
+    member_name_map: dict[str, str] = {}
+    if user_agg:
+        name_result = await db.execute(
+            select(Member.id, Member.name).where(Member.id.in_(list(user_agg.keys()))))
+        member_name_map = {r[0]: r[1] for r in name_result.all()}
+
+    by_user = []
+    for mid, agg in user_agg.items():
+        cnt = agg["commit_count"]
+        by_user.append({
+            "id": mid,
+            "name": member_name_map.get(mid, "unknown"),
+            "total_wait_ms": agg["total_wait_ms"],
+            "avg_wait_ms": round(agg["total_wait_ms"] / cnt) if cnt > 0 else 0,
+            "commit_count": cnt,
+        })
+    by_user.sort(key=lambda x: x["total_wait_ms"], reverse=True)
+
+    by_model = []
+    for model, agg in model_agg.items():
+        cnt = agg["usage_count"]
+        by_model.append({
+            "model": model,
+            "total_wait_ms": agg["total_wait_ms"],
+            "avg_wait_ms": round(agg["total_wait_ms"] / cnt) if cnt > 0 else 0,
+            "usage_count": cnt,
+        })
+    by_model.sort(key=lambda x: x["total_wait_ms"], reverse=True)
+
+    return {
+        "by_user": by_user,
+        "by_model": by_model,
+        "total_wait_ms": total_wait,
+        "avg_wait_per_commit_ms": round(total_wait / total_commits) if total_commits > 0 else 0,
+    }

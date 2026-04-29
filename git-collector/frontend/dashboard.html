@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Git-AI Intelligence · 团队 AI 工程洞察</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ─── Theme Tokens ───────────────────────────────────────────── */
+:root[data-theme="dark"]{
+  --bg:#0a0e14; --bg-2:#0d1219; --surface:#131820; --surface-2:#181f29; --surface-hi:#1d2532;
+  --line:rgba(255,255,255,.06); --line-2:rgba(255,255,255,.10); --line-hi:rgba(255,255,255,.16);
+  --ink:#e6edf3; --ink-2:#b3bbc6; --muted:#7d8896; --muted-2:#5a6573;
+  --brand:#5b8def; --brand-2:#7a5cf0; --green:#3fb950; --amber:#d29922; --red:#f85149; --teal:#39c5bb; --pink:#f778ba;
+  --grid:rgba(255,255,255,.05); --tip-bg:#0b0f15; --tip-bd:rgba(255,255,255,.10);
+  --shadow:0 4px 20px rgba(0,0,0,.35); --shadow-lg:0 24px 60px rgba(0,0,0,.45);
+  --radius:14px; --radius-lg:20px;
+  --grad-brand:linear-gradient(135deg,#5b8def 0%,#7a5cf0 100%);
+  --grad-success:linear-gradient(135deg,#39c5bb 0%,#3fb950 100%);
+}
+:root[data-theme="light"]{
+  --bg:#f4f6fa; --bg-2:#ffffff; --surface:#ffffff; --surface-2:#f7f9fc; --surface-hi:#eef2f7;
+  --line:rgba(15,23,42,.06); --line-2:rgba(15,23,42,.10); --line-hi:rgba(15,23,42,.16);
+  --ink:#0f172a; --ink-2:#334155; --muted:#64748b; --muted-2:#94a3b8;
+  --brand:#3b6cf6; --brand-2:#7a5cf0; --green:#10b981; --amber:#f59e0b; --red:#ef4444; --teal:#0ea5a3; --pink:#db2777;
+  --grid:rgba(15,23,42,.05); --tip-bg:#0f172a; --tip-bd:rgba(255,255,255,.20);
+  --shadow:0 1px 3px rgba(15,23,42,.06),0 8px 24px rgba(15,23,42,.06);
+  --shadow-lg:0 20px 50px rgba(15,23,42,.12);
+  --radius:14px; --radius-lg:20px;
+  --grad-brand:linear-gradient(135deg,#3b6cf6 0%,#7a5cf0 100%);
+  --grad-success:linear-gradient(135deg,#0ea5a3 0%,#10b981 100%);
+}
+
+/* ─── Reset ─────────────────────────────────────────────────── */
+*,*::before,*::after{box-sizing:border-box}
+html,body{margin:0;padding:0;height:100%;font-family:'Inter','PingFang SC','Microsoft YaHei UI',system-ui,sans-serif;font-size:14px;color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:transparent}
+input,select{font:inherit;color:inherit}
+.mono{font-family:'JetBrains Mono','SF Mono',Consolas,monospace;font-feature-settings:"tnum"}
+.tabular{font-variant-numeric:tabular-nums}
+::-webkit-scrollbar{width:10px;height:10px}
+::-webkit-scrollbar-thumb{background:var(--line-hi);border-radius:6px}
+::-webkit-scrollbar-track{background:transparent}
+
+/* ─── Login ─────────────────────────────────────────────────── */
+.login{position:fixed;inset:0;display:grid;place-items:center;padding:24px;background:radial-gradient(60% 50% at 30% 10%,rgba(91,141,239,.18),transparent 60%),radial-gradient(60% 50% at 80% 90%,rgba(122,92,240,.16),transparent 60%),var(--bg)}
+.login-card{width:min(420px,100%);background:var(--surface);border:1px solid var(--line);border-radius:24px;padding:36px;box-shadow:var(--shadow-lg)}
+.login-card .badge{display:inline-flex;align-items:center;gap:8px;padding:5px 12px;border:1px solid var(--line-2);border-radius:999px;font-size:11px;color:var(--muted);font-weight:600;letter-spacing:.06em;text-transform:uppercase}
+.login-card .badge::before{content:"";width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(63,185,80,.18)}
+.login-card h1{margin:18px 0 6px;font-size:24px;letter-spacing:-.02em}
+.login-card .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+.field{margin-bottom:14px}
+.field label{display:block;color:var(--ink-2);font-size:12px;font-weight:600;margin-bottom:6px}
+.field input{width:100%;height:44px;padding:0 14px;background:var(--surface-2);border:1px solid var(--line-2);border-radius:12px;outline:none;transition:.15s}
+.field input:focus{border-color:var(--brand);box-shadow:0 0 0 4px rgba(91,141,239,.15)}
+.btn-primary{width:100%;height:44px;border-radius:12px;background:var(--grad-brand);color:#fff;font-weight:700;letter-spacing:.01em;transition:.15s;box-shadow:0 8px 22px rgba(91,141,239,.28)}
+.btn-primary:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(91,141,239,.36)}
+.err{min-height:20px;margin-top:10px;color:var(--red);font-size:12px;font-weight:600;text-align:center}
+
+/* ─── Layout ────────────────────────────────────────────────── */
+.app{display:none;min-height:100vh;flex-direction:column}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:18px;height:60px;padding:0 24px;background:rgba(10,14,20,.72);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-bottom:1px solid var(--line)}
+:root[data-theme="light"] .topbar{background:rgba(255,255,255,.78)}
+.brand{display:flex;align-items:center;gap:11px}
+.brand-mark{width:30px;height:30px;border-radius:9px;background:var(--grad-brand);position:relative;box-shadow:0 4px 14px rgba(91,141,239,.36)}
+.brand-mark::before,.brand-mark::after{content:"";position:absolute;background:#fff;border-radius:1px}
+.brand-mark::before{left:7px;top:8px;width:14px;height:2px}
+.brand-mark::after{left:7px;top:14px;width:10px;height:2px;opacity:.7}
+.brand-meta{line-height:1.15}
+.brand-meta b{font-size:13px;font-weight:700;letter-spacing:-.01em}
+.brand-meta span{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+.tabs{display:flex;gap:2px;padding:3px;background:var(--surface-2);border:1px solid var(--line);border-radius:11px;margin-left:8px}
+.tab{padding:0 13px;height:30px;border-radius:8px;color:var(--muted);font-size:12.5px;font-weight:600;letter-spacing:-.005em;transition:.12s;display:inline-flex;align-items:center;gap:6px}
+.tab:hover{color:var(--ink-2)}
+.tab.active{background:var(--surface-hi);color:var(--ink);box-shadow:inset 0 0 0 1px var(--line-2)}
+.spacer{flex:1}
+.bar-actions{display:flex;align-items:center;gap:8px}
+.iconbtn{width:34px;height:34px;border-radius:10px;background:var(--surface-2);border:1px solid var(--line);color:var(--ink-2);display:inline-grid;place-items:center;transition:.12s}
+.iconbtn:hover{background:var(--surface-hi);border-color:var(--line-hi);color:var(--ink)}
+.select{height:34px;padding:0 30px 0 12px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;color:var(--ink);font-size:12.5px;font-weight:600;appearance:none;background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 16px) 14px,calc(100% - 11px) 14px;background-size:5px 5px;background-repeat:no-repeat;cursor:pointer;transition:.12s}
+.select:hover{border-color:var(--line-hi)}
+.live-pill{display:inline-flex;align-items:center;gap:7px;padding:0 10px;height:28px;border-radius:8px;background:var(--surface-2);border:1px solid var(--line);color:var(--muted);font-size:11.5px;font-weight:600}
+.live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 0 3px rgba(63,185,80,.18);animation:pulse 2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.45}}
+
+/* ─── Workspace ─────────────────────────────────────────────── */
+.workspace{padding:22px 24px 60px;display:grid;gap:18px;max-width:1640px;margin:0 auto;width:100%}
+.section{display:none;gap:18px}
+.section.active{display:grid}
+
+/* Header banner — auto-fit responsive */
+.banner{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;align-items:stretch}
+.banner-hero{position:relative;padding:22px 24px;border-radius:var(--radius-lg);background:radial-gradient(120% 120% at 0 0,rgba(91,141,239,.18),transparent 55%),radial-gradient(120% 120% at 100% 100%,rgba(122,92,240,.20),transparent 55%),linear-gradient(135deg,var(--surface) 0%,var(--surface-2) 100%);border:1px solid var(--line);overflow:hidden}
+.banner-hero::after{content:"";position:absolute;inset:auto -40px -50px auto;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(91,141,239,.22),transparent 70%);filter:blur(8px)}
+.banner-hero .label{position:relative;z-index:1;font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--muted);font-weight:700;margin-bottom:6px}
+.banner-hero .score-row{position:relative;z-index:1;display:flex;align-items:flex-end;gap:14px}
+.banner-hero .score{font-size:54px;line-height:1;font-weight:800;letter-spacing:-.04em;background:linear-gradient(135deg,var(--ink) 0%,var(--brand) 100%);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.banner-hero .delta{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:8px;font-size:12px;font-weight:700;background:rgba(63,185,80,.14);color:var(--green)}
+.banner-hero .delta.down{background:rgba(248,81,73,.14);color:var(--red)}
+.banner-hero .delta.flat{background:var(--surface-hi);color:var(--muted)}
+.banner-hero .helper{position:relative;z-index:1;color:var(--muted);font-size:12.5px;margin-top:8px;line-height:1.55}
+
+.kpi{position:relative;padding:16px 18px;border-radius:var(--radius);background:var(--surface);border:1px solid var(--line);display:flex;flex-direction:column;gap:6px;min-height:118px;overflow:hidden;transition:.15s}
+.kpi:hover{border-color:var(--line-hi);transform:translateY(-1px);box-shadow:var(--shadow)}
+.kpi .head{display:flex;align-items:center;justify-content:space-between;color:var(--muted);font-size:11.5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.kpi .icon{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;background:var(--surface-hi);color:var(--brand);font-size:14px}
+.kpi .val{font-size:28px;font-weight:800;letter-spacing:-.03em;color:var(--ink)}
+.kpi .val small{font-size:14px;font-weight:600;color:var(--muted-2);margin-left:4px}
+.kpi .meta{font-size:11.5px;color:var(--muted);display:flex;align-items:center;gap:8px;margin-top:auto}
+.kpi .meta .delta{padding:1px 7px;border-radius:6px;font-size:11px;font-weight:700;background:rgba(63,185,80,.14);color:var(--green)}
+.kpi .meta .delta.down{background:rgba(248,81,73,.14);color:var(--red)}
+.kpi .meta .delta.flat{background:var(--surface-hi);color:var(--muted)}
+.kpi .spark{position:absolute;right:10px;bottom:8px;width:90px;height:34px;opacity:.85;pointer-events:none}
+
+/* Card primitive */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.card.pad{padding:18px}
+.card-head{display:flex;align-items:center;justify-content:space-between;padding:16px 18px;border-bottom:1px solid var(--line)}
+.card-head .ttl{display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:700;letter-spacing:-.005em}
+.card-head .ttl::before{content:"";width:3px;height:14px;border-radius:2px;background:var(--grad-brand)}
+.card-head .ttl span{color:var(--muted);font-weight:500;font-size:12px;margin-left:6px}
+.card-head .actions{display:flex;align-items:center;gap:8px}
+.card-body{padding:16px 18px}
+.card-body.flush{padding:0}
+.chart-wrap{position:relative;padding:14px 16px 18px;height:300px}
+.chart-wrap.sm{height:240px}
+.chart-wrap.lg{height:340px}
+
+/* Grids — auto-fit responsive */
+.grid-2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));gap:18px}
+.grid-3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,260px),1fr));gap:18px}
+.grid-asym{display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr);gap:18px}
+.grid-asym-2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.6fr);gap:18px}
+
+/* KPI tooltip (? icon) */
+.kpi .head .ttl-wrap{display:inline-flex;align-items:center;gap:6px}
+.tip{position:relative;display:inline-grid;place-items:center;width:15px;height:15px;border-radius:50%;background:var(--surface-hi);border:1px solid var(--line-2);color:var(--muted);font-size:10px;font-style:normal;font-weight:800;cursor:help;transition:.12s}
+.tip:hover{color:var(--ink);border-color:var(--line-hi);background:var(--surface)}
+.tip-pop{position:fixed;z-index:9999;max-width:300px;padding:9px 12px;border-radius:9px;background:var(--tip-bg);color:#e2e8f0;border:1px solid var(--tip-bd);font-size:11.5px;font-weight:500;line-height:1.55;box-shadow:var(--shadow-lg);pointer-events:none;opacity:0;transform:translate(-50%,-8px);transition:opacity .08s}
+.tip-pop.show{opacity:1}
+
+/* Adoption funnel */
+.funnel{display:grid;gap:10px;padding:18px}
+.funnel-row{display:grid;grid-template-columns:130px 1fr 110px;gap:14px;align-items:center}
+.funnel-bar{position:relative;height:32px;border-radius:10px;background:var(--surface-hi);overflow:hidden;border:1px solid var(--line)}
+.funnel-bar i{display:block;height:100%;border-radius:inherit;background:var(--grad-brand);position:relative;transition:width .6s cubic-bezier(.4,0,.2,1)}
+.funnel-bar i::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgba(255,255,255,.18));border-radius:inherit}
+.funnel-bar.b1 i{background:linear-gradient(135deg,#5b8def,#7a5cf0)}
+.funnel-bar.b2 i{background:linear-gradient(135deg,#7a5cf0,#a855f7)}
+.funnel-bar.b3 i{background:linear-gradient(135deg,#39c5bb,#3fb950)}
+.funnel-bar.b4 i{background:linear-gradient(135deg,#3fb950,#22c55e)}
+.funnel-bar.b5 i{background:linear-gradient(135deg,#d29922,#f59e0b)}
+.funnel-lbl{font-size:12.5px;font-weight:600;color:var(--ink-2);display:flex;align-items:center;gap:6px}
+.funnel-lbl small{display:block;font-size:10.5px;color:var(--muted);font-weight:500;letter-spacing:.04em;text-transform:uppercase;margin-top:2px}
+.funnel-num{text-align:right;font-variant-numeric:tabular-nums}
+.funnel-num b{font-size:16px;font-weight:800;letter-spacing:-.02em}
+.funnel-num small{display:block;font-size:11px;color:var(--muted);font-weight:600;margin-top:2px}
+.funnel-conv{display:inline-flex;align-items:center;gap:4px;padding:1px 6px;border-radius:5px;background:var(--surface-hi);color:var(--muted);font-size:10.5px;font-weight:600;margin-left:6px}
+
+/* Quadrant scatter & legend */
+.quad-meta{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,140px),1fr));gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+.quad-q{display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;background:var(--surface-2);border:1px solid var(--line)}
+.quad-q i{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.quad-q b{font-size:11.5px;font-weight:700;color:var(--ink-2)}
+.quad-q small{font-size:10.5px;color:var(--muted);margin-left:auto;font-variant-numeric:tabular-nums;font-weight:600}
+
+/* Adoption wall (50 squares) */
+.adoption{padding:18px}
+.adoption-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:10px}
+.adoption-head .legend{display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--muted)}
+.adoption-head .lk{display:inline-flex;align-items:center;gap:6px}
+.adoption-head .lk i{width:10px;height:10px;border-radius:3px}
+.wall{display:grid;grid-template-columns:repeat(auto-fill,minmax(86px,1fr));gap:6px}
+.cell{height:34px;border-radius:6px;background:var(--surface-hi);position:relative;cursor:pointer;transition:.15s;border:1px solid transparent;overflow:hidden}
+.cell:hover{border-color:var(--line-hi);transform:translateY(-2px)}
+.cell.l1{background:rgba(63,185,80,.18)}
+.cell.l2{background:rgba(63,185,80,.36)}
+.cell.l3{background:rgba(63,185,80,.55)}
+.cell.l4{background:rgba(63,185,80,.78)}
+.cell.l0{background:var(--surface-hi);border:1px dashed var(--line-2)}
+.cell .nm{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:0 7px;font-size:11px;font-weight:700;color:rgba(255,255,255,.92);letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+:root[data-theme="light"] .cell .nm{color:#0f172a}
+.cell.l0 .nm{color:var(--muted)}
+.cell.l1 .nm,.cell.l2 .nm{color:var(--ink)}
+
+/* Hourly heatmap */
+.heatmap{padding:18px}
+.heatmap-grid{display:grid;grid-template-columns:auto repeat(24,minmax(0,1fr));gap:3px;font-size:10px;color:var(--muted)}
+.hm-h{padding:2px 4px;text-align:center}
+.hm-row-label{padding:2px 8px 2px 0;color:var(--muted);font-weight:600;text-align:right}
+.hm-cell{aspect-ratio:1;border-radius:4px;background:var(--surface-hi)}
+.hm-l1{background:rgba(91,141,239,.20)}
+.hm-l2{background:rgba(91,141,239,.42)}
+.hm-l3{background:rgba(91,141,239,.62)}
+.hm-l4{background:rgba(91,141,239,.85)}
+.hm-l5{background:#5b8def}
+.hm-legend{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted);margin-top:10px;justify-content:flex-end}
+.hm-legend .scale{display:flex;gap:2px}
+.hm-legend .scale i{width:14px;height:10px;border-radius:2px}
+
+/* Tables */
+.t-wrap{overflow:auto;max-width:100%}
+table{width:100%;border-collapse:collapse}
+thead th{position:sticky;top:0;background:var(--surface);color:var(--muted);font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;font-weight:700;padding:11px 16px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap}
+tbody td{padding:13px 16px;border-bottom:1px solid var(--line);font-size:13px;white-space:nowrap}
+tbody tr:last-child td{border-bottom:0}
+tbody tr.row{transition:.12s;cursor:pointer}
+tbody tr.row:hover td{background:var(--surface-2)}
+.rank-pill{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--surface-hi);color:var(--ink-2);font-weight:700;font-size:11.5px;border:1px solid var(--line)}
+.rank-pill.gold{background:linear-gradient(135deg,#f1c40f,#e67e22);color:#fff;border:0}
+.rank-pill.silver{background:linear-gradient(135deg,#bdc3c7,#7f8c8d);color:#fff;border:0}
+.rank-pill.bronze{background:linear-gradient(135deg,#cd7f32,#a0522d);color:#fff;border:0}
+.member-cell{display:flex;align-items:center;gap:10px}
+.avatar{width:32px;height:32px;border-radius:10px;display:grid;place-items:center;font-weight:700;color:#fff;font-size:12px;letter-spacing:.02em;flex-shrink:0}
+.member-cell .name{font-weight:700;font-size:13px;line-height:1.2}
+.member-cell .id{font-size:11px;color:var(--muted);margin-top:2px}
+.lvl-tag{padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.04em}
+.lvl-S{background:linear-gradient(135deg,rgba(248,81,73,.16),rgba(122,92,240,.16));color:#f778ba;border:1px solid rgba(247,120,186,.26)}
+.lvl-A{background:rgba(91,141,239,.14);color:var(--brand);border:1px solid rgba(91,141,239,.24)}
+.lvl-B{background:rgba(63,185,80,.14);color:var(--green);border:1px solid rgba(63,185,80,.24)}
+.lvl-C{background:rgba(210,153,34,.14);color:var(--amber);border:1px solid rgba(210,153,34,.24)}
+.lvl-D{background:var(--surface-hi);color:var(--muted);border:1px solid var(--line-2)}
+.bar-cell{display:flex;align-items:center;gap:10px}
+.bar{flex:1;max-width:140px;height:6px;border-radius:999px;background:var(--surface-hi);overflow:hidden;position:relative}
+.bar i{display:block;height:100%;border-radius:inherit;background:var(--grad-brand)}
+.bar.green i{background:var(--grad-success)}
+.bar.amber i{background:linear-gradient(135deg,#d29922,#f59e0b)}
+.bar-cell .num{font-size:12px;font-weight:600;min-width:48px;text-align:right;font-variant-numeric:tabular-nums}
+.tag{display:inline-flex;align-items:center;gap:5px;padding:2px 8px;border-radius:7px;background:var(--surface-hi);border:1px solid var(--line);font-size:11px;font-weight:600;color:var(--ink-2)}
+.tag.green{background:rgba(63,185,80,.10);border-color:rgba(63,185,80,.22);color:var(--green)}
+.tag.amber{background:rgba(210,153,34,.10);border-color:rgba(210,153,34,.22);color:var(--amber)}
+.tag.red{background:rgba(248,81,73,.10);border-color:rgba(248,81,73,.22);color:var(--red)}
+.tag.brand{background:rgba(91,141,239,.10);border-color:rgba(91,141,239,.22);color:var(--brand)}
+.empty{padding:36px;text-align:center;color:var(--muted);font-size:13px}
+
+/* Mini stat list */
+.minilist{display:grid;gap:2px}
+.mini-row{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px dashed var(--line)}
+.mini-row:last-child{border-bottom:0}
+.mini-row .lbl{font-size:13px;font-weight:600}
+.mini-row .lbl small{display:block;font-size:11px;font-weight:500;color:var(--muted);margin-top:2px}
+.mini-row .num{font-variant-numeric:tabular-nums;font-weight:700;font-size:13px}
+.mini-row .num small{font-size:11px;font-weight:500;color:var(--muted);margin-left:4px}
+.mini-row .bar{max-width:80px}
+
+/* Modal */
+.modal{position:fixed;inset:0;display:none;place-items:center;background:rgba(2,6,12,.72);backdrop-filter:blur(10px);z-index:60;padding:24px;animation:fadeIn .18s ease-out}
+.modal.show{display:grid}
+.modal-card{width:min(1080px,100%);max-height:88vh;overflow:auto;background:var(--bg-2);border:1px solid var(--line);border-radius:20px;box-shadow:var(--shadow-lg);animation:slideUp .22s ease-out}
+@keyframes fadeIn{from{opacity:0}to{opacity:1}}
+@keyframes slideUp{from{transform:translateY(14px);opacity:0}to{transform:translateY(0);opacity:1}}
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--line);position:sticky;top:0;background:var(--bg-2);z-index:1}
+.modal-head .who{display:flex;align-items:center;gap:14px}
+.modal-head .who .avatar{width:46px;height:46px;font-size:16px;border-radius:13px}
+.modal-head h2{margin:0;font-size:18px;letter-spacing:-.01em}
+.modal-head h2 small{display:block;font-size:12px;color:var(--muted);font-weight:500;margin-top:2px}
+.modal-head .x{width:34px;height:34px;border-radius:10px;background:var(--surface);border:1px solid var(--line);color:var(--ink-2);font-size:16px;display:grid;place-items:center}
+.modal-head .x:hover{background:var(--surface-2)}
+.modal-body{padding:22px 24px}
+
+/* Toast & loading */
+.toast{position:fixed;left:50%;bottom:28px;transform:translateX(-50%) translateY(20px);padding:11px 18px;border-radius:11px;background:var(--surface-hi);border:1px solid var(--line-2);color:var(--ink);font-weight:600;font-size:13px;box-shadow:var(--shadow-lg);opacity:0;transition:.2s;z-index:80}
+.toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.skel{position:relative;background:var(--surface-hi);overflow:hidden}
+.skel::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,var(--line-2) 50%,transparent);animation:shimmer 1.4s infinite}
+@keyframes shimmer{0%{transform:translateX(-100%)}100%{transform:translateX(100%)}}
+.loading{cursor:progress}
+.loading .workspace{opacity:.5;pointer-events:none}
+
+/* Responsive */
+@media(max-width:1440px){
+  .banner{grid-template-columns:minmax(260px,1.3fr) repeat(auto-fit,minmax(150px,1fr))}
+  .banner-hero .score{font-size:46px}
+}
+@media(max-width:1280px){
+  .grid-asym,.grid-asym-2{grid-template-columns:1fr}
+  .funnel-row{grid-template-columns:120px 1fr 100px;gap:10px}
+}
+@media(max-width:1024px){
+  .workspace{max-width:100%}
+  .banner{grid-template-columns:1fr;}
+  .banner-hero{padding:18px 20px}
+  .banner-hero .score{font-size:42px}
+  .kpi{min-height:104px}
+  .kpi .val{font-size:24px}
+}
+@media(max-width:768px){
+  .topbar{height:auto;flex-wrap:wrap;padding:10px 14px;gap:10px}
+  .tabs{order:5;width:100%;overflow:auto;flex-wrap:nowrap}
+  .tab{flex-shrink:0}
+  .workspace{padding:14px;gap:14px}
+  .grid-2,.grid-3{grid-template-columns:1fr}
+  .chart-wrap{height:240px}
+  .chart-wrap.lg{height:280px}
+  .funnel{padding:14px}
+  .funnel-row{grid-template-columns:96px 1fr 84px;gap:8px}
+  .funnel-lbl{font-size:11.5px}
+  .funnel-lbl small{display:none}
+  .funnel-num b{font-size:14px}
+  .quad-meta{padding:10px 14px}
+}
+@media(max-width:480px){
+  .banner-hero{padding:16px}
+  .banner-hero .score{font-size:36px}
+  .kpi{padding:14px;min-height:96px}
+  .kpi .val{font-size:22px}
+  .kpi .spark{display:none}
+  .funnel-row{grid-template-columns:80px 1fr 72px}
+  .live-pill{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ─── Login ─────────────────────────────────────────────── -->
+<section id="login" class="login">
+  <div class="login-card">
+    <div class="badge">Git-AI Intelligence</div>
+    <h1>团队 AI 工程洞察平台</h1>
+    <p class="sub">登录以查看团队 AI 编码采纳度、影响与效率分析。</p>
+    <form onsubmit="login(event)">
+      <div class="field"><label>用户名</label><input id="u" autocomplete="username" value="admin"></div>
+      <div class="field"><label>密码</label><input id="p" type="password" autocomplete="current-password" placeholder="请输入密码"></div>
+      <button class="btn-primary" type="submit">登录控制台</button>
+      <div class="err" id="loginErr"></div>
+    </form>
+  </div>
+</section>
+
+<!-- ─── App ───────────────────────────────────────────────── -->
+<section id="app" class="app">
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-meta"><b>Git-AI Intelligence</b><span id="apiStatus">Connecting…</span></div>
+    </div>
+    <nav class="tabs" id="tabs">
+      <button class="tab active" data-tab="overview">总览</button>
+      <button class="tab" data-tab="people">成员</button>
+      <button class="tab" data-tab="trends">趋势</button>
+      <button class="tab" data-tab="repos">仓库</button>
+      <button class="tab" data-tab="agents">Agent · 模型</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="bar-actions">
+      <span class="live-pill"><span class="live-dot"></span><span id="liveTime">--:--:--</span></span>
+      <select class="select" id="globalDays" onchange="refreshAll()">
+        <option value="7">近 7 天</option>
+        <option value="14">近 14 天</option>
+        <option value="30" selected>近 30 天</option>
+        <option value="90">近 90 天</option>
+        <option value="0">全部</option>
+      </select>
+      <button class="iconbtn" id="themeBtn" title="切换主题" onclick="toggleTheme()">◐</button>
+      <button class="iconbtn" title="刷新" onclick="refreshAll()">↻</button>
+      <button class="iconbtn" title="退出" onclick="logout()">⏻</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <!-- ─── OVERVIEW ─────────────────────────────────────── -->
+    <section id="overview" class="section active">
+      <!-- Banner -->
+      <div class="banner">
+        <div class="kpi"><div class="head"><span class="ttl-wrap">总编辑行数 <i class="tip" data-tip="SUM(git_diff_added_lines + git_diff_deleted_lines)">?</i></span><div class="icon">◉</div></div>
+          <div class="val" id="kAdopt">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAdoptD">→</span><span id="kAdoptM">新增 + 删除</span></div>
+          <canvas class="spark" id="spkAdopt"></canvas></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">AI 编辑行数 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></span><div class="icon">∑</div></div>
+          <div class="val" id="kAcc">0<small>行</small></div><div class="meta"><span class="delta flat" id="kAccD">→</span><span id="kAccM">AI 新增 + AI 删除</span></div>
+          <canvas class="spark" id="spkAcc"></canvas></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">AI 代码占比 <i class="tip" data-tip="AI 编辑行数 / 总编辑行数 * 100%">?</i></span><div class="icon">⌬</div></div>
+          <div class="val" id="kSurv">0%</div><div class="meta"><span class="delta flat" id="kSurvD">→</span><span id="kSurvM">AI / Total</span></div>
+          <canvas class="spark" id="spkSurv"></canvas></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">Agent 编辑次数 <i class="tip" data-tip="COUNT(event_type=4 AND kind IN ('ai_agent','ai_tab'))">?</i></span><div class="icon">⇡</div></div>
+          <div class="val" id="kThru">0<small>次</small></div><div class="meta"><span class="delta flat" id="kThruD">→</span><span id="kThruM">AI checkpoint</span></div>
+          <canvas class="spark" id="spkThru"></canvas></div>
+        <div class="kpi"><div class="head"><span class="ttl-wrap">对话消息数 <i class="tip" data-tip="COUNT(CAS/Bundle messages WHERE role='user')">?</i></span><div class="icon">◇</div></div>
+          <div class="val" id="kModel">0<small>条</small></div><div class="meta"><span class="delta flat" id="kModelD">→</span><span id="kModelM">用户 prompt</span></div>
+          <canvas class="spark" id="spkModel"></canvas></div>
+      </div>
+
+      <!-- Adoption Funnel + Productivity Quadrant -->
+      <div class="grid-asym-2">
+        <div class="card">
+          <div class="card-head">
+            <div class="ttl">采纳漏斗 <span>Adoption Funnel · 5 阶段</span></div>
+            <div class="actions"><span class="tag" id="funnelHint">从全员到高频使用者</span></div>
+          </div>
+          <div class="funnel" id="funnel"></div>
+        </div>
+        <div class="card">
+          <div class="card-head">
+            <div class="ttl">生产力四象限 <span>Productivity Quadrant</span>
+              <i class="tip" data-tip="X=AI 行/(AI 行+人工行)*100%；Y=提交数；气泡=AI 行数" style="margin-left:6px">?</i>
+            </div>
+          </div>
+          <div class="chart-wrap" style="height:280px"><canvas id="quadChart"></canvas></div>
+          <div class="quad-meta" id="quadMeta"></div>
+        </div>
+      </div>
+
+      <!-- Adoption wall + Hourly heatmap -->
+      <div class="grid-asym">
+        <div class="card adoption">
+          <div class="adoption-head">
+            <div class="ttl" style="display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:700">
+              <span style="display:inline-block;width:3px;height:14px;border-radius:2px;background:var(--grad-brand)"></span>
+              50 人采纳热力 · Adoption Wall
+              <span style="color:var(--muted);font-weight:500;font-size:12px;margin-left:6px" id="adoptSummary">- 活跃 / -</span>
+            </div>
+            <div class="legend">
+              <div class="lk"><i style="background:var(--surface-hi);border:1px dashed var(--line-2)"></i>未触达</div>
+              <div class="lk"><i style="background:rgba(63,185,80,.18)"></i>低</div>
+              <div class="lk"><i style="background:rgba(63,185,80,.36)"></i>中</div>
+              <div class="lk"><i style="background:rgba(63,185,80,.55)"></i>高</div>
+              <div class="lk"><i style="background:rgba(63,185,80,.78)"></i>极高</div>
+            </div>
+          </div>
+          <div class="wall" id="adoptionWall"></div>
+        </div>
+
+        <div class="card heatmap">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+            <div style="display:flex;align-items:center;gap:10px;font-size:13.5px;font-weight:700">
+              <span style="display:inline-block;width:3px;height:14px;border-radius:2px;background:var(--grad-brand)"></span>
+              工作时段热力 · 24h
+              <span style="color:var(--muted);font-weight:500;font-size:12px;margin-left:6px">事件密度</span>
+            </div>
+          </div>
+          <div class="heatmap-grid" id="heatmap"></div>
+          <div class="hm-legend">
+            <span>少</span>
+            <div class="scale">
+              <i class="hm-cell"></i><i class="hm-cell hm-l1"></i><i class="hm-cell hm-l2"></i>
+              <i class="hm-cell hm-l3"></i><i class="hm-cell hm-l4"></i><i class="hm-cell hm-l5"></i>
+            </div>
+            <span>多</span>
+          </div>
+          <div id="peakHours" style="margin-top:14px;padding:12px;background:var(--surface-2);border-radius:10px;font-size:12px;color:var(--muted);display:none">
+            <b style="color:var(--ink-2)">高峰时段</b>
+            <span id="peakHoursTxt"></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Trend + leaderboard preview -->
+      <div class="grid-asym-2">
+        <div class="card">
+          <div class="card-head"><div class="ttl">成员 AI 代码排名 <span>本期 AI 编辑行 Top 8</span><i class="tip" data-tip="按 AI 编辑行数降序排序">?</i></div>
+            <div class="actions"><button class="iconbtn" onclick="showTab('people')" title="查看全部" style="font-size:11px;width:auto;padding:0 10px;height:28px">查看全部 →</button></div>
+          </div>
+          <div class="card-body flush"><div class="t-wrap"><table>
+            <thead><tr><th style="width:36px">#</th><th>成员</th><th>AI 编辑行</th><th>总编辑行</th><th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th></tr></thead>
+            <tbody id="topPerformers"></tbody>
+          </table></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="ttl">AI / 非 AI 编辑构成 <span>新增 + 删除</span></div></div>
+          <div class="chart-wrap"><canvas id="linesChart"></canvas></div>
+        </div>
+      </div>
+
+      <!-- AI code trend -->
+      <div class="card">
+        <div class="card-head">
+          <div class="ttl">AI 代码占比趋势 <span>AI 新增 · 非 AI 新增 · 占比 · 提交</span></div>
+          <div class="actions">
+            <select class="select" id="effUser" onchange="refreshEfficiency()" style="height:30px;font-size:11.5px">
+              <option value="">全员汇总</option>
+            </select>
+          </div>
+        </div>
+        <div class="chart-wrap lg"><canvas id="effChart"></canvas></div>
+      </div>
+    </section>
+
+    <!-- ─── PEOPLE ───────────────────────────────────────── -->
+    <section id="people" class="section">
+      <div class="grid-3">
+        <div class="card pad" style="background:linear-gradient(135deg,rgba(63,185,80,.08),transparent);border-color:rgba(63,185,80,.22)">
+          <div style="font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase">高产成员</div>
+          <div style="font-size:32px;font-weight:800;letter-spacing:-.03em;margin-top:6px;color:var(--green)" id="hpCount">-</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">评分 ≥ 60，AI 工程主力</div>
+        </div>
+        <div class="card pad" style="background:linear-gradient(135deg,rgba(91,141,239,.08),transparent);border-color:rgba(91,141,239,.22)">
+          <div style="font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase">成长成员</div>
+          <div style="font-size:32px;font-weight:800;letter-spacing:-.03em;margin-top:6px;color:var(--brand)" id="grCount">-</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">评分 20–60，仍有提升空间</div>
+        </div>
+        <div class="card pad" style="background:linear-gradient(135deg,rgba(248,81,73,.08),transparent);border-color:rgba(248,81,73,.22)">
+          <div style="font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase">未触达成员</div>
+          <div style="font-size:32px;font-weight:800;letter-spacing:-.03em;margin-top:6px;color:var(--red)" id="lwCount">-</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">需关注或培训的成员</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">
+          <div class="ttl">成员 AI 代码排名 <span>点击查看个人详情</span><i class="tip" data-tip="按 AI 编辑行数降序排序">?</i></div>
+          <div class="actions">
+            <input id="memberSearch" oninput="filterMembers()" placeholder="搜索成员..." style="height:30px;width:200px;padding:0 12px;background:var(--surface-2);border:1px solid var(--line);border-radius:9px;outline:none;font-size:12.5px">
+          </div>
+        </div>
+        <div class="card-body flush"><div class="t-wrap"><table>
+          <thead><tr>
+            <th style="width:36px">#</th><th>成员</th><th>AI 编辑行 <i class="tip" data-tip="SUM(total_ai_additions + total_ai_deletions)">?</i></th><th>总编辑行 <i class="tip" data-tip="SUM(git_diff_added_lines + git_diff_deleted_lines)">?</i></th>
+            <th>AI 占比 <i class="tip" data-tip="AI 编辑行数 / 总编辑行数 * 100%">?</i></th><th>留存率 <i class="tip" data-tip="max(AI 新增行 - 人工删除行, 0) / AI 新增行 * 100%">?</i></th><th>提交</th>
+            <th>Agent 编辑</th><th>Prompt <i class="tip" data-tip="COUNT(CAS/Bundle messages WHERE role='user')">?</i></th><th>偏好模型 <i class="tip" data-tip="COUNT(DISTINCT model)">?</i></th><th>偏好 Agent</th>
+          </tr></thead>
+          <tbody id="rankingBody"></tbody>
+        </table></div></div>
+      </div>
+    </section>
+
+    <!-- ─── TRENDS ───────────────────────────────────────── -->
+    <section id="trends" class="section">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="ttl">活跃趋势 <span>提交 · AI 编辑 · 活跃成员</span></div>
+            <div class="actions"><select class="select" id="tlUser" onchange="refreshTimeline()" style="height:30px;font-size:11.5px"><option value="">全员</option></select></div>
+          </div>
+          <div class="chart-wrap"><canvas id="tlChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="ttl">12 周趋势 <span>提交 vs AI 编辑</span></div></div>
+          <div class="chart-wrap"><canvas id="weeklyChart"></canvas></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head"><div class="ttl">Agent 代码按语言分布趋势 <span>日期 · 文件扩展名 · 新增行</span><i class="tip" data-tip="按日期和扩展名汇总 lines_added_sloc；AI 新增仅统计 kind IN ('ai_agent','ai_tab')">?</i></div></div>
+        <div class="chart-wrap lg"><canvas id="langChart"></canvas></div>
+      </div>
+
+    </section>
+
+    <!-- ─── REPOS ────────────────────────────────────────── -->
+    <section id="repos" class="section">
+      <div class="card">
+        <div class="card-head"><div class="ttl">仓库 AI 代码排名 <span>按 AI 编辑行排序</span></div></div>
+        <div class="card-body flush"><div class="t-wrap"><table>
+          <thead><tr>
+            <th>仓库</th><th>提交</th><th>贡献者</th><th>总编辑行</th><th>AI 编辑行</th>
+            <th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th><th>Top 贡献者</th><th>最近活跃</th>
+          </tr></thead>
+          <tbody id="repoBody"></tbody>
+        </table></div></div>
+      </div>
+    </section>
+
+    <!-- ─── AGENTS ───────────────────────────────────────── -->
+    <section id="agents" class="section">
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="ttl">Agent 使用分布 <span>调用次数</span></div></div>
+          <div class="chart-wrap"><canvas id="agentChart"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="ttl">模型使用分布 <span>Top 10</span></div></div>
+          <div class="chart-wrap"><canvas id="modelChart"></canvas></div>
+        </div>
+      </div>
+      <div class="grid-2">
+        <div class="card">
+          <div class="card-head"><div class="ttl">Agent 排行 <span>使用人数 / 次数</span></div></div>
+          <div class="card-body"><div class="minilist" id="agentList"></div></div>
+        </div>
+        <div class="card">
+          <div class="card-head"><div class="ttl">模型排行 <span>使用人数 / 次数</span></div></div>
+          <div class="card-body"><div class="minilist" id="modelList"></div></div>
+        </div>
+      </div>
+    </section>
+  </main>
+</section>
+
+<div class="modal" id="modal"><div class="modal-card" id="modalCard"></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* ─── State ────────────────────────────────────────────────── */
+let auth = sessionStorage.getItem('gitaiAuth') || '';
+let theme = localStorage.getItem('gitaiTheme') || 'dark';
+let charts = {};
+let state = { members: [], ranking: [], overview: null };
+const COLORS = ['#5b8def','#7a5cf0','#3fb950','#d29922','#39c5bb','#f778ba','#f85149','#5dade2','#e67e22','#8e44ad'];
+const AVATAR_BG = ['#5b8def','#7a5cf0','#3fb950','#d29922','#39c5bb','#f778ba','#f85149','#e67e22','#1abc9c','#9b59b6','#34495e','#16a085'];
+
+document.documentElement.setAttribute('data-theme', theme);
+
+/* ─── Utils ────────────────────────────────────────────────── */
+const $ = id => document.getElementById(id);
+function hdr(){ return auth ? { Authorization: 'Basic ' + auth } : {}; }
+function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('show'); setTimeout(() => el.classList.remove('show'), 2400); }
+function fmt(n){ n = Number(n)||0; if(n>=1e9) return (n/1e9).toFixed(1)+'B'; if(n>=1e6) return (n/1e6).toFixed(1)+'M'; if(n>=1e4) return (n/1e3).toFixed(1)+'k'; return Math.round(n).toLocaleString('zh-CN'); }
+function pct(n){ n = Number(n)||0; return n.toFixed(n>=10?0:1)+'%'; }
+function ms(n){ n = Number(n)||0; if(!n) return '0s'; if(n<1000) return n+'ms'; if(n<60000) return (n/1000).toFixed(1)+'s'; return (n/60000).toFixed(1)+'m'; }
+function dt(x){ return x ? new Date(x).toLocaleDateString('zh-CN', { month:'2-digit', day:'2-digit' }) : '-'; }
+function initials(name){ if(!name) return '?'; const s = String(name).trim(); const parts = s.split(/\s+/); if(parts.length>1) return (parts[0][0]+parts[1][0]).toUpperCase(); return s.substring(0,2).toUpperCase(); }
+function avatarColor(s){ if(!s) return AVATAR_BG[0]; let h=0; for(let i=0;i<s.length;i++) h=(h*31+s.charCodeAt(i))>>>0; return AVATAR_BG[h%AVATAR_BG.length]; }
+function ensureTipPop(){
+  let pop = document.querySelector('.tip-pop');
+  if(!pop){ pop = document.createElement('div'); pop.className = 'tip-pop'; document.body.appendChild(pop); }
+  return pop;
+}
+function moveTipPop(el){
+  const pop = ensureTipPop();
+  const r = el.getBoundingClientRect();
+  pop.style.left = Math.min(Math.max(r.left + r.width / 2, 160), window.innerWidth - 160) + 'px';
+  const top = r.top > pop.offsetHeight + 16 ? r.top - pop.offsetHeight - 10 : r.bottom + 10;
+  pop.style.top = Math.min(Math.max(top, 12), window.innerHeight - pop.offsetHeight - 12) + 'px';
+}
+document.addEventListener('mouseover', e => {
+  const el = e.target.closest && e.target.closest('.tip[data-tip]');
+  if(!el) return;
+  const pop = ensureTipPop();
+  pop.textContent = el.dataset.tip || '';
+  pop.classList.add('show');
+  moveTipPop(el);
+});
+document.addEventListener('mouseout', e => {
+  if(e.target.closest && e.target.closest('.tip[data-tip]')) ensureTipPop().classList.remove('show');
+});
+window.addEventListener('scroll', () => ensureTipPop().classList.remove('show'), true);
+function deltaTag(curr, prev){
+  if(prev==null||prev===0) return ['flat','→ 持平'];
+  const d = (curr-prev)/prev*100;
+  if(d>5) return ['up', '↑ ' + d.toFixed(1) + '%'];
+  if(d<-5) return ['down', '↓ ' + Math.abs(d).toFixed(1) + '%'];
+  return ['flat', '→ ' + d.toFixed(1) + '%'];
+}
+
+/* ─── Auth ─────────────────────────────────────────────────── */
+async function api(path){
+  const r = await fetch(path, { headers: hdr() });
+  if(r.status === 401){ logout(false); throw new Error('未登录或密码错误'); }
+  if(!r.ok) throw new Error(path + ' ' + r.status);
+  return r.json();
+}
+async function login(e){
+  e.preventDefault();
+  auth = btoa($('u').value + ':' + $('p').value);
+  try {
+    await api('/api/check-auth');
+    sessionStorage.setItem('gitaiAuth', auth);
+    $('login').style.display = 'none';
+    $('app').style.display = 'flex';
+    refreshAll();
+  } catch(err){
+    $('loginErr').textContent = '登录失败，请检查账号或密码';
+    auth = '';
+  }
+}
+function logout(msg = true){
+  sessionStorage.removeItem('gitaiAuth');
+  auth = '';
+  $('app').style.display = 'none';
+  $('login').style.display = 'grid';
+  if(msg) toast('已退出');
+}
+function toggleTheme(){
+  theme = theme === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', theme);
+  localStorage.setItem('gitaiTheme', theme);
+  // re-render charts with new colors
+  if($('app').style.display !== 'none') refreshAll();
+}
+
+/* ─── Tabs ─────────────────────────────────────────────────── */
+function showTab(id){
+  document.querySelectorAll('.section').forEach(x => x.classList.remove('active'));
+  $(id).classList.add('active');
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('active', x.dataset.tab === id));
+  setTimeout(() => Object.values(charts).forEach(c => c && c.resize && c.resize()), 100);
+}
+document.querySelectorAll('#tabs .tab').forEach(t => t.addEventListener('click', () => showTab(t.dataset.tab)));
+
+/* ─── Chart factory ────────────────────────────────────────── */
+function chartTheme(){
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    grid: cs.getPropertyValue('--grid').trim(),
+    ink: cs.getPropertyValue('--ink').trim(),
+    muted: cs.getPropertyValue('--muted').trim(),
+    surface: cs.getPropertyValue('--surface').trim(),
+    line: cs.getPropertyValue('--line-2').trim(),
+    tipBg: cs.getPropertyValue('--tip-bg').trim()
+  };
+}
+function buildChart(id, type, data, opt = {}){
+  if(charts[id]){ charts[id].destroy(); }
+  const t = chartTheme();
+  const baseOpt = {
+    responsive: true,
+    maintainAspectRatio: false,
+    layout: { padding: { top: 6, right: 6, bottom: 0, left: 2 } },
+    plugins: {
+      legend: { labels: { color: t.muted, boxWidth: 10, boxHeight: 10, usePointStyle: true, font: { size: 11, family: "'Inter','PingFang SC'" } }, align: 'end' },
+      tooltip: {
+        backgroundColor: t.tipBg, borderColor: t.line, borderWidth: 1,
+        padding: 10, cornerRadius: 10, titleColor: '#fff', bodyColor: '#e2e8f0',
+        usePointStyle: true, boxPadding: 6, titleFont: { size: 12, weight: 600 }, bodyFont: { size: 12 }
+      }
+    },
+    scales: type === 'doughnut' || type === 'pie' ? {} : {
+      x: { grid: { display: false, drawBorder: false }, ticks: { color: t.muted, font: { size: 11 } }, border: { display: false } },
+      y: { beginAtZero: true, grid: { color: t.grid, drawBorder: false }, ticks: { color: t.muted, font: { size: 11 } }, border: { display: false } }
+    }
+  };
+  charts[id] = new Chart($(id), { type, data, options: deepMerge(baseOpt, opt) });
+  return charts[id];
+}
+function deepMerge(a, b){
+  if(!b) return a;
+  const out = Array.isArray(a) ? a.slice() : Object.assign({}, a);
+  for(const k in b){
+    if(b[k] && typeof b[k] === 'object' && !Array.isArray(b[k])) out[k] = deepMerge(a[k] || {}, b[k]);
+    else out[k] = b[k];
+  }
+  return out;
+}
+function sparkline(id, values, color){
+  if(!values || !values.length) return;
+  if(charts[id]) charts[id].destroy();
+  const ctx = $(id);
+  if(!ctx) return;
+  const t = chartTheme();
+  charts[id] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: values.map((_,i) => i), datasets: [{
+      data: values, borderColor: color, borderWidth: 2,
+      fill: true, backgroundColor: hexToRgba(color, .15),
+      tension: .35, pointRadius: 0
+    }]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      plugins: { legend: { display: false }, tooltip: { enabled: false } },
+      scales: { x: { display: false }, y: { display: false } },
+      elements: { line: { capBezierPoints: false } }
+    }
+  });
+}
+function hexToRgba(hex, a){
+  const h = hex.replace('#',''); const f = h.length===3 ? h.split('').map(c=>c+c).join('') : h;
+  const r = parseInt(f.substring(0,2),16), g = parseInt(f.substring(2,4),16), b = parseInt(f.substring(4,6),16);
+  return 'rgba(' + r + ',' + g + ',' + b + ',' + a + ')';
+}
+
+/* ─── Refresh ──────────────────────────────────────────────── */
+async function refreshAll(){
+  document.body.classList.add('loading');
+  try {
+    const days = $('globalDays').value;
+    const arr = await Promise.all([
+      api('/api/stats/overview'),
+      api('/api/stats/ranking?days=' + days),
+      api('/api/stats/members'),
+      api('/api/stats/agents'),
+      api('/api/stats/models'),
+      api('/api/stats/timeline?days=' + (days || 30)),
+      api('/api/stats/ai-code-trend?days=' + (days || 30)),
+      api('/api/stats/time-distribution?days=' + (days || 30)),
+      api('/api/stats/repo-stats?days=' + days),
+      api('/api/stats/weekly'),
+      api('/api/stats/language-trend?days=' + (days || 30))
+    ]);
+    state.overview = arr[0]; state.ranking = arr[1].ranking || []; state.members = arr[2].members || [];
+    renderBanner(arr[0], arr[6].trend || [], arr[4].models || []);
+    renderFunnel(arr[0], state.ranking);
+    renderQuadrant(state.ranking);
+    renderAdoptionWall(state.ranking);
+    renderTopPerformers(state.ranking);
+    renderRanking(state.ranking);
+    renderPeopleStats(state.ranking);
+    renderLines(arr[0]);
+    renderEfficiency(arr[6]);
+    renderTimeline(arr[5]);
+    renderHeatmap(arr[7]);
+    renderRepos(arr[8]);
+    renderWeekly(arr[9]);
+    renderLanguageTrend(arr[10]);
+    renderAgents(arr[3]);
+    renderModels(arr[4]);
+    populateMemberSelectors();
+    $('apiStatus').textContent = '已同步 · ' + state.members.length + ' 成员 · ' + (state.ranking.length) + ' 活跃';
+    $('liveTime').textContent = new Date().toLocaleTimeString('zh-CN');
+  } catch(e){
+    toast(e.message);
+  } finally {
+    document.body.classList.remove('loading');
+  }
+}
+
+/* ─── Banner KPI ───────────────────────────────────────────── */
+function renderBanner(d, trend, models){
+  $('kAdopt').innerHTML = fmt(d.total_edit_lines || 0) + '<small>行</small>';
+  $('kAdoptM').textContent = '新增 ' + fmt((d.total_edit_lines || 0) - (d.total_ai_deleted || 0) - (d.human_deleted_lines || 0)) + ' / 删除 ' + fmt((d.total_ai_deleted || 0) + (d.human_deleted_lines || 0));
+
+  $('kAcc').innerHTML = fmt(d.ai_edit_lines || 0) + '<small>行</small>';
+  $('kAccM').textContent = '新增 ' + fmt(d.total_ai_lines || 0) + ' / 删除 ' + fmt(d.total_ai_deleted || 0);
+
+  $('kSurv').textContent = pct(d.ai_code_pct || 0);
+  $('kSurvM').textContent = fmt(d.ai_edit_lines || 0) + ' / ' + fmt(d.total_edit_lines || 0);
+
+  $('kThru').innerHTML = fmt(d.agent_edit_count || 0) + '<small>次</small>';
+  $('kThruM').textContent = 'AI checkpoint';
+
+  $('kModel').innerHTML = fmt(d.prompt_message_count || 0) + '<small>条</small>';
+  $('kModelM').textContent = 'role=user';
+
+  // Sparklines from trend (last 14 points)
+  const last = trend.slice(-14);
+  if(last.length >= 2){
+    sparkline('spkAdopt', last.map(x => (x.ai_added_lines || 0) + (x.non_ai_added_lines || 0)), '#5b8def');
+    sparkline('spkAcc', last.map(x => x.ai_added_lines || 0), '#3fb950');
+    sparkline('spkSurv', last.map(x => x.ai_code_pct || 0), '#39c5bb');
+    sparkline('spkThru', last.map(x => x.commit_count || 0), '#7a5cf0');
+    sparkline('spkModel', (models || []).slice(0, 14).map(x => x.usage_count || 0), '#d29922');
+  }
+}
+
+/* ─── Adoption Funnel ──────────────────────────────────────── */
+function renderFunnel(overview, ranking){
+  const total = overview.member_count || ranking.length || 0;
+  const activated = ranking.filter(r => (r.commits || 0) > 0 || (r.edits || 0) > 0).length;
+  const mau = overview.active_users_30d || 0;
+  const wau = overview.active_users_7d || 0;
+  const sortedByCommits = ranking.slice().sort((a, b) => (b.commits || 0) - (a.commits || 0));
+  const powerCount = Math.max(1, Math.floor(sortedByCommits.length * 0.25));
+  const powerThreshold = sortedByCommits.length ? (sortedByCommits[Math.min(powerCount - 1, sortedByCommits.length - 1)].commits || 0) : 0;
+  const powerUsers = sortedByCommits.filter(r => (r.commits || 0) >= powerThreshold && (r.commits || 0) > 0).length;
+
+  const stages = [
+    { lbl: 'Total Members', sub: '全员', cls: 'b1', value: total, baseline: total },
+    { lbl: 'Activated', sub: '已触达', cls: 'b2', value: activated, baseline: total },
+    { lbl: 'MAU · 月活', sub: '30d Active', cls: 'b3', value: mau, baseline: total },
+    { lbl: 'WAU · 周活', sub: '7d Active', cls: 'b4', value: wau, baseline: total },
+    { lbl: 'Power Users', sub: 'Top 25%', cls: 'b5', value: powerUsers, baseline: total }
+  ];
+  const max = Math.max(1, total);
+  const html = stages.map((s, i) => {
+    const pctVal = s.baseline ? Math.min(100, (s.value / s.baseline) * 100) : 0;
+    const widthVal = max ? (s.value / max * 100) : 0;
+    const prev = i > 0 ? stages[i - 1].value : null;
+    let conv = '';
+    if(prev != null && prev > 0){
+      const c = (s.value / prev * 100);
+      conv = '<span class="funnel-conv">→ ' + c.toFixed(0) + '%</span>';
+    }
+    return '<div class="funnel-row">'
+      + '<div class="funnel-lbl"><span>' + s.lbl + '<small>' + s.sub + '</small></span></div>'
+      + '<div class="funnel-bar ' + s.cls + '"><i style="width:' + Math.max(2, widthVal) + '%"></i></div>'
+      + '<div class="funnel-num"><b>' + s.value + '</b><small>' + pctVal.toFixed(0) + '% / 总' + conv + '</small></div>'
+      + '</div>';
+  }).join('');
+  $('funnel').innerHTML = html;
+  $('funnelHint').textContent = '激活率 ' + (total ? (activated / total * 100).toFixed(0) : 0) + '% · 周活率 ' + (total ? (wau / total * 100).toFixed(0) : 0) + '%';
+}
+
+/* ─── Productivity Quadrant ────────────────────────────────── */
+function renderQuadrant(ranking){
+  const data = ranking.filter(r => (r.commits || 0) + (r.ai_lines || 0) > 0).map(r => ({
+    x: Math.min(100, Number(r.ai_pct) || 0),
+    y: Number(r.commits) || 0,
+    r: 4 + Math.min(20, Math.sqrt((r.ai_lines || 0) / 30)),
+    name: r.name,
+    id: r.id,
+    aiLines: r.ai_lines || 0
+  }));
+  const yMax = Math.max(10, ...data.map(p => p.y));
+  const midY = yMax / 2;
+  const midX = 50;
+  // Color by quadrant
+  const palette = { ai: '#7a5cf0', traditional: '#5b8def', exp: '#d29922', new: '#7d8896' };
+  const colored = data.map(p => {
+    let c = palette.new;
+    if(p.x >= midX && p.y >= midY) c = palette.ai;
+    else if(p.x < midX && p.y >= midY) c = palette.traditional;
+    else if(p.x >= midX && p.y < midY) c = palette.exp;
+    return Object.assign({}, p, { backgroundColor: hexToRgba(c, .55), borderColor: c, color: c });
+  });
+  const t = chartTheme();
+  buildChart('quadChart', 'bubble', {
+    datasets: [{
+      label: '成员',
+      data: colored,
+      backgroundColor: colored.map(p => p.backgroundColor),
+      borderColor: colored.map(p => p.borderColor),
+      borderWidth: 1.5
+    }]
+  }, {
+    plugins: {
+      legend: { display: false },
+      tooltip: { callbacks: { label: (ctx) => {
+        const p = ctx.raw; return p.name + ' · AI ' + p.x.toFixed(0) + '% · ' + p.y + ' 提交 · AI 行 ' + fmt(p.aiLines);
+      }}}
+    },
+    scales: {
+      x: { min: 0, max: 100, title: { display: true, text: 'AI 代码占比 %', color: t.muted, font: { size: 11 } }, grid: { color: t.grid }, ticks: { color: t.muted } },
+      y: { beginAtZero: true, title: { display: true, text: '提交数', color: t.muted, font: { size: 11 } }, grid: { color: t.grid }, ticks: { color: t.muted } }
+    },
+    onClick: (e, els) => { if(els && els.length){ const p = colored[els[0].index]; if(p && p.id) showUser(p.id); } }
+  });
+  // Quadrant counts
+  let q1 = 0, q2 = 0, q3 = 0, q4 = 0;
+  colored.forEach(p => {
+    if(p.x >= midX && p.y >= midY) q1++;
+    else if(p.x < midX && p.y >= midY) q2++;
+    else if(p.x >= midX && p.y < midY) q3++;
+    else q4++;
+  });
+  $('quadMeta').innerHTML =
+      '<div class="quad-q"><i style="background:' + palette.ai + '"></i><b>高产 AI 主力</b><small>' + q1 + '</small></div>'
+    + '<div class="quad-q"><i style="background:' + palette.traditional + '"></i><b>高产传统派</b><small>' + q2 + '</small></div>'
+    + '<div class="quad-q"><i style="background:' + palette.exp + '"></i><b>低产实验者</b><small>' + q3 + '</small></div>'
+    + '<div class="quad-q"><i style="background:' + palette.new + '"></i><b>低产 / 未触达</b><small>' + q4 + '</small></div>';
+}
+
+/* ─── Adoption Wall ────────────────────────────────────────── */
+function renderAdoptionWall(rank){
+  const wall = $('adoptionWall'); wall.innerHTML = '';
+  const sorted = rank.slice().sort((a, b) => b.contribution.score - a.contribution.score);
+  const max = Math.max(1, ...sorted.map(r => r.ai_lines || 0));
+  let active = 0;
+  sorted.forEach(r => {
+    const ai = r.ai_lines || 0;
+    let cls = 'l0';
+    if(ai > 0){ active++;
+      const ratio = ai / max;
+      if(ratio > .65) cls = 'l4';
+      else if(ratio > .35) cls = 'l3';
+      else if(ratio > .12) cls = 'l2';
+      else cls = 'l1';
+    }
+    const cell = document.createElement('div');
+    cell.className = 'cell ' + cls;
+    cell.title = r.name + ' · 评分 ' + r.contribution.score + ' · AI 行 ' + fmt(ai) + ' · 提交 ' + (r.commits || 0);
+    cell.onclick = () => showUser(r.id);
+    cell.innerHTML = '<div class="nm">' + esc(r.name) + '</div>';
+    wall.appendChild(cell);
+  });
+  $('adoptSummary').textContent = active + ' 活跃 / ' + sorted.length;
+}
+
+/* ─── Heatmap ──────────────────────────────────────────────── */
+function renderHeatmap(d){
+  const dist = d.distribution || [];
+  const peak = d.peak_hours || [];
+  const max = Math.max(1, ...dist.map(x => x.events));
+  const grid = $('heatmap'); grid.innerHTML = '';
+  // rows: events, commits, edits
+  const rows = [
+    { lbl: '总事件', key: 'events' },
+    { lbl: '提交', key: 'commits' },
+    { lbl: '编辑', key: 'edits' }
+  ];
+  // header row
+  grid.appendChild(cellEl('hm-row-label', ''));
+  for(let h = 0; h < 24; h++) grid.appendChild(cellEl('hm-h', h.toString().padStart(2,'0')));
+  rows.forEach(row => {
+    grid.appendChild(cellEl('hm-row-label', row.lbl));
+    const rowMax = Math.max(1, ...dist.map(x => x[row.key] || 0));
+    for(let h = 0; h < 24; h++){
+      const v = (dist.find(x => x.hour === h) || {})[row.key] || 0;
+      const r = v / rowMax;
+      let lvl = '';
+      if(v > 0){
+        if(r > .8) lvl = 'hm-l5';
+        else if(r > .55) lvl = 'hm-l4';
+        else if(r > .32) lvl = 'hm-l3';
+        else if(r > .14) lvl = 'hm-l2';
+        else lvl = 'hm-l1';
+      }
+      const cell = cellEl('hm-cell ' + lvl, '');
+      cell.title = row.lbl + ' · ' + h.toString().padStart(2,'0') + ':00 · ' + v;
+      grid.appendChild(cell);
+    }
+  });
+  if(peak.length){
+    $('peakHours').style.display = 'block';
+    $('peakHoursTxt').innerHTML = ' 团队最常在 <b style="color:var(--ink)">' + peak.map(h => h.toString().padStart(2,'0') + ':00').join(' · ') + '</b> 协作 AI';
+  }
+}
+function cellEl(cls, txt){ const e = document.createElement('div'); e.className = cls; e.textContent = txt; return e; }
+
+/* ─── Top performers ───────────────────────────────────────── */
+function renderTopPerformers(rank){
+  const top = rank.slice(0, 8);
+  $('topPerformers').innerHTML = top.length ? top.map((u, i) => {
+    const r = i + 1;
+    const rcls = r === 1 ? 'gold' : r === 2 ? 'silver' : r === 3 ? 'bronze' : '';
+    return '<tr class="row" onclick="showUser(\'' + u.id + '\')"><td><span class="rank-pill ' + rcls + '">' + r + '</span></td>'
+      + '<td><div class="member-cell"><div class="avatar" style="background:' + avatarColor(u.name) + '">' + initials(u.name) + '</div>'
+      + '<div><div class="name">' + esc(u.name) + '</div><div class="id">' + esc(u.distinct_id || '') + '</div></div></div></td>'
+      + '<td><b class="tabular">' + fmt(u.ai_edit_lines || 0) + '</b></td>'
+      + '<td class="tabular">' + fmt(u.total_edit_lines || 0) + '</td>'
+      + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(u.ai_code_pct || u.ai_pct || 0, 100) + '%"></i></div><span class="num">' + pct(u.ai_code_pct || u.ai_pct || 0) + '</span></div></td>'
+      + '<td class="tabular">' + (u.edits || 0) + '</td>'
+      + '<td class="tabular">' + fmt(u.prompt_message_count || 0) + '</td></tr>';
+  }).join('') : '<tr><td colspan="7" class="empty">暂无成员数据</td></tr>';
+}
+function esc(s){ return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c])); }
+
+/* ─── People page ──────────────────────────────────────────── */
+function renderPeopleStats(rank){
+  let hp = 0, gr = 0, lw = 0;
+  rank.forEach(r => { const s = r.contribution.score || 0; if(s >= 60) hp++; else if(s >= 20) gr++; else lw++; });
+  $('hpCount').textContent = hp;
+  $('grCount').textContent = gr;
+  $('lwCount').textContent = lw;
+}
+function renderRanking(rank){
+  const tbody = $('rankingBody');
+  if(!rank.length){ tbody.innerHTML = '<tr><td colspan="11" class="empty">暂无成员数据</td></tr>'; return; }
+  tbody.innerHTML = rank.map((u, i) => {
+    const r = i + 1;
+    const rcls = r === 1 ? 'gold' : r === 2 ? 'silver' : r === 3 ? 'bronze' : '';
+    const surv = u.contribution.sub_scores ? u.contribution.sub_scores.survival : 0;
+    return '<tr class="row" data-name="' + esc(u.name).toLowerCase() + '" onclick="showUser(\'' + u.id + '\')">'
+      + '<td><span class="rank-pill ' + rcls + '">' + r + '</span></td>'
+      + '<td><div class="member-cell"><div class="avatar" style="background:' + avatarColor(u.name) + '">' + initials(u.name) + '</div>'
+      + '<div><div class="name">' + esc(u.name) + '</div><div class="id">' + esc(u.distinct_id || '') + '</div></div></div></td>'
+      + '<td><b class="tabular">' + fmt(u.ai_edit_lines || 0) + '</b></td>'
+      + '<td class="tabular">' + fmt(u.total_edit_lines || 0) + '</td>'
+      + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(u.ai_code_pct || u.ai_pct || 0, 100) + '%"></i></div><span class="num">' + pct(u.ai_code_pct || u.ai_pct || 0) + '</span></div></td>'
+      + '<td><span class="tag ' + (surv >= 80 ? 'green' : surv >= 50 ? 'amber' : 'red') + '">' + pct(surv) + '</span></td>'
+      + '<td class="tabular">' + (u.commits || 0) + '</td>'
+      + '<td class="tabular">' + (u.edits || 0) + '</td>'
+      + '<td class="tabular">' + fmt(u.prompt_message_count || 0) + '</td>'
+      + '<td class="tabular">' + (u.models_used || 0) + ' 个</td>'
+      + '<td>' + (u.agents_used || 0) + ' 个</td></tr>';
+  }).join('');
+}
+function filterMembers(){
+  const q = $('memberSearch').value.toLowerCase();
+  document.querySelectorAll('#rankingBody tr').forEach(tr => {
+    tr.style.display = !q || (tr.dataset.name || '').includes(q) ? '' : 'none';
+  });
+}
+
+/* ─── Other charts ─────────────────────────────────────────── */
+function renderLines(d){
+  const t = chartTheme();
+  const nonAiEdit = Math.max(0, (d.total_edit_lines || 0) - (d.ai_edit_lines || 0));
+  buildChart('linesChart', 'bar', {
+    labels: ['代码行'],
+    datasets: [
+      { label: '非 AI 编辑', data: [nonAiEdit], backgroundColor: '#5b8def', borderRadius: 8, barThickness: 60, stack: 's1' },
+      { label: 'AI 编辑', data: [d.ai_edit_lines || 0], backgroundColor: '#3fb950', borderRadius: 8, barThickness: 60, stack: 's1' }
+    ]
+  }, {
+    indexAxis: 'y',
+    scales: { x: { stacked: true, grid: { color: t.grid } }, y: { stacked: true, grid: { display: false } } },
+    plugins: { legend: { position: 'bottom' } }
+  });
+}
+function renderEfficiency(d){
+  const t = chartTheme();
+  const trend = d.trend || [];
+  buildChart('effChart', 'line', {
+    labels: trend.map(x => x.date),
+    datasets: [
+      { type: 'bar', label: 'AI 新增行', data: trend.map(x => x.ai_added_lines || 0), backgroundColor: 'rgba(63,185,80,.55)', borderRadius: 4, stack: 'add', order: 3 },
+      { type: 'bar', label: '非 AI 新增行', data: trend.map(x => x.non_ai_added_lines || 0), backgroundColor: 'rgba(91,141,239,.35)', borderRadius: 4, stack: 'add', order: 4 },
+      { type: 'line', label: 'AI 占比 %', yAxisID: 'y2', data: trend.map(x => x.ai_code_pct || 0), borderColor: '#d29922', tension: .35, pointRadius: 0, borderWidth: 2.5, order: 1 },
+      { type: 'line', label: '提交次数', yAxisID: 'y3', data: trend.map(x => x.commit_count || 0), borderColor: '#39c5bb', tension: .35, pointRadius: 0, borderWidth: 2, borderDash: [4,4], order: 2 }
+    ]
+  }, {
+    interaction: { mode: 'index', intersect: false },
+    scales: {
+      x: { grid: { display: false } },
+      y: { stacked: true, position: 'left', grid: { color: t.grid }, title: { display: true, text: '新增行', color: t.muted, font: { size: 11 } } },
+      y2: { position: 'right', grid: { display: false }, title: { display: true, text: 'AI 占比 %', color: t.muted, font: { size: 11 } }, beginAtZero: true, max: 100 },
+      y3: { display: false, beginAtZero: true }
+    },
+    plugins: { legend: { position: 'top', align: 'end' } }
+  });
+}
+async function refreshEfficiency(){
+  const uid = $('effUser').value;
+  const days = $('globalDays').value || 30;
+  const d = await api('/api/stats/ai-code-trend?days=' + days + (uid ? '&member_id=' + uid : ''));
+  renderEfficiency(d);
+}
+function renderTimeline(d){
+  const t = chartTheme();
+  const tl = d.timeline || [];
+  buildChart('tlChart', 'line', {
+    labels: tl.map(x => x.date),
+    datasets: [
+      { label: '提交', data: tl.map(x => x.commits), borderColor: '#5b8def', backgroundColor: hexToRgba('#5b8def',.12), tension: .35, fill: true, pointRadius: 0, borderWidth: 2 },
+      { label: 'AI 编辑', data: tl.map(x => x.edits), borderColor: '#3fb950', backgroundColor: hexToRgba('#3fb950',.10), tension: .35, fill: true, pointRadius: 0, borderWidth: 2 },
+      { label: '活跃成员', data: tl.map(x => x.unique_users || 0), borderColor: '#d29922', tension: .35, pointRadius: 0, borderWidth: 2, borderDash: [3, 3] }
+    ]
+  }, { interaction: { mode: 'index', intersect: false } });
+}
+async function refreshTimeline(){
+  const uid = $('tlUser').value;
+  const days = $('globalDays').value || 30;
+  const d = await api('/api/stats/timeline?days=' + days + (uid ? '&member_id=' + uid : ''));
+  renderTimeline(d);
+}
+function renderRepos(d){
+  const r = d.repos || [];
+  $('repoBody').innerHTML = r.length ? r.map(x => {
+    const top = (x.top_contributors || []).slice(0, 3).map(c => '<span class="tag">' + esc(c.name) + ' · ' + c.commits + '</span>').join(' ');
+    return '<tr><td><b>' + esc(x.repo_name || x.repo_url || '-') + '</b><div style="font-size:11px;color:var(--muted);margin-top:3px">' + esc((x.repo_url || '').replace(/.*[\/:]/, '').slice(0, 50)) + '</div></td>'
+      + '<td class="tabular">' + (x.commit_count || 0) + '</td>'
+      + '<td class="tabular">' + (x.contributor_count || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.total_edit_lines || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.ai_edit_lines || 0) + '</td>'
+      + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(x.ai_pct, 100) + '%"></i></div><span class="num">' + pct(x.ai_pct) + '</span></div></td>'
+      + '<td class="tabular">' + (x.edit_count || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.prompt_message_count || 0) + '</td>'
+      + '<td>' + (top || '<span style="color:var(--muted)">-</span>') + '</td>'
+      + '<td class="tabular">' + dt(x.last_activity) + '</td></tr>';
+  }).join('') : '<tr><td colspan="10" class="empty">暂无仓库数据</td></tr>';
+}
+function renderWeekly(d){
+  const w = d.weeks || [];
+  buildChart('weeklyChart', 'bar', {
+    labels: w.map(x => x.week),
+    datasets: [
+      { label: '提交', data: w.map(x => x.commits), backgroundColor: '#5b8def', borderRadius: 5, stack: 's' },
+      { label: 'AI 编辑', data: w.map(x => x.edits), backgroundColor: '#3fb950', borderRadius: 5, stack: 's' }
+    ]
+  }, { scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } } });
+}
+function renderLanguageTrend(d){
+  const rows = d.trend || [];
+  const dates = [...new Set(rows.map(x => x.date))];
+  const topExt = [...new Set(rows.slice().sort((a, b) => (b.ai_added_lines || 0) - (a.ai_added_lines || 0)).map(x => x.extension))].slice(0, 8);
+  const datasets = topExt.map((ext, i) => ({
+    label: ext,
+    data: dates.map(date => {
+      const row = rows.find(x => x.date === date && x.extension === ext);
+      return row ? (row.ai_added_lines || 0) : 0;
+    }),
+    backgroundColor: COLORS[i % COLORS.length],
+    borderRadius: 4,
+    stack: 'lang'
+  }));
+  buildChart('langChart', 'bar', {
+    labels: dates,
+    datasets
+  }, {
+    interaction: { mode: 'index', intersect: false },
+    scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true, title: { display: true, text: 'AI 新增行' } } },
+    plugins: {
+      legend: { position: 'top', align: 'end' },
+      tooltip: { callbacks: { label: (ctx) => {
+        const ext = ctx.dataset.label;
+        const date = dates[ctx.dataIndex];
+        const row = rows.find(x => x.date === date && x.extension === ext) || {};
+        return ext + ': AI ' + fmt(row.ai_added_lines || 0) + ' / 总 ' + fmt(row.total_added_lines || 0);
+      } } }
+    }
+  });
+}
+function renderAgents(d){
+  const a = (d.agents || []).slice(0, 8);
+  if(a.length) buildChart('agentChart', 'doughnut', {
+    labels: a.map(x => x.name), datasets: [{ data: a.map(x => x.usage_count), backgroundColor: COLORS, borderColor: 'transparent', borderWidth: 0 }]
+  }, { cutout: '64%', plugins: { legend: { position: 'right', align: 'center' } } });
+  $('agentList').innerHTML = a.length ? a.map((x, i) => {
+    const max = Math.max(...a.map(y => y.usage_count));
+    return '<div class="mini-row"><div class="lbl">' + esc(x.name)
+      + '<small>' + (x.user_count || 0) + ' 人使用 · ' + (x.models || []).slice(0,2).map(m => esc(m.name)).join(', ') + '</small></div>'
+      + '<div style="display:flex;align-items:center;gap:10px"><div class="bar" style="background:' + hexToRgba(COLORS[i % COLORS.length], .15) + '"><i style="width:' + (x.usage_count / max * 100) + '%;background:' + COLORS[i % COLORS.length] + '"></i></div>'
+      + '<div class="num">' + fmt(x.usage_count) + '</div></div></div>';
+  }).join('') : '<div class="empty">暂无 Agent 数据</div>';
+}
+function renderModels(d){
+  const m = (d.models || []).slice(0, 10);
+  if(m.length) buildChart('modelChart', 'bar', {
+    labels: m.map(x => x.name),
+    datasets: [{ label: '使用次数', data: m.map(x => x.usage_count), backgroundColor: m.map((_, i) => COLORS[i % COLORS.length]), borderRadius: 6 }]
+  }, { indexAxis: 'y', plugins: { legend: { display: false } } });
+  $('modelList').innerHTML = m.length ? m.map((x, i) => {
+    const max = Math.max(...m.map(y => y.usage_count));
+    return '<div class="mini-row"><div class="lbl">' + esc(x.name) + '<small>' + (x.user_count || 0) + ' 人使用</small></div>'
+      + '<div style="display:flex;align-items:center;gap:10px"><div class="bar" style="background:' + hexToRgba(COLORS[i % COLORS.length], .15) + '"><i style="width:' + (x.usage_count / max * 100) + '%;background:' + COLORS[i % COLORS.length] + '"></i></div>'
+      + '<div class="num">' + fmt(x.usage_count) + '</div></div></div>';
+  }).join('') : '<div class="empty">暂无模型数据</div>';
+}
+function populateMemberSelectors(){
+  const opts = '<option value="">全员汇总</option>' + state.members.map(m => '<option value="' + m.id + '">' + esc(m.name) + '</option>').join('');
+  ['effUser', 'tlUser'].forEach(id => { if($(id)) $(id).innerHTML = opts; });
+}
+
+/* ─── User detail modal ────────────────────────────────────── */
+async function showUser(id){
+  try {
+    const d = await api('/api/stats/user-detail/' + id);
+    const acc = d.ai_code_pct || d.ai_pct || 0;
+    const surv = d.contribution.sub_scores ? d.contribution.sub_scores.survival : 0;
+    $('modalCard').innerHTML =
+      '<div class="modal-head"><div class="who"><div class="avatar" style="background:' + avatarColor(d.name) + '">' + initials(d.name) + '</div>'
+      + '<h2>' + esc(d.name) + '<small>' + esc(d.email || d.distinct_id || '') + '</small></h2></div>'
+      + '<button class="x" onclick="$(\'modal\').classList.remove(\'show\')">×</button></div>'
+      + '<div class="modal-body">'
+      + '<div class="grid-3" style="margin-bottom:18px">'
+      + kpiCard('评分' + helpTip('评分 = 代码量*40% + 辅助频率*25% + 代码留存率*20% + 活跃度*15%'), d.contribution.score, '<span class="lvl-tag lvl-' + d.contribution.level + '">' + d.contribution.level + '</span> 等级' + helpTip('S>=80；A>=60；B>=40；C>=20；D<20'))
+      + kpiCard('AI 编辑行', fmt(d.ai_edit_lines || 0), '占比 ' + pct(acc) + ' · 总编辑 ' + fmt(d.total_edit_lines || 0))
+      + kpiCard('提交 / Agent 编辑', d.commit_count + ' / ' + d.edit_count, 'Prompt ' + fmt(d.prompt_message_count || 0) + ' 条 · 模型 ' + ((d.models || []).length) + ' 个' + helpTip('COUNT(DISTINCT model)'))
+      + '</div>'
+      + '<div class="grid-2" style="margin-bottom:18px">'
+      + '<div class="card"><div class="card-head"><div class="ttl">每日活动</div></div><div class="chart-wrap sm"><canvas id="ud_daily"></canvas></div></div>'
+      + '<div class="card"><div class="card-head"><div class="ttl">模型分布</div></div><div class="chart-wrap sm"><canvas id="ud_models"></canvas></div></div>'
+      + '</div>'
+      + '<div class="grid-2">'
+      + '<div class="card"><div class="card-head"><div class="ttl">分项评分' + helpTip('评分 = 代码量*40% + 辅助频率*25% + 代码留存率*20% + 活跃度*15%') + '</div></div><div class="card-body">'
+      + miniRow('代码量得分' + helpTip('AI 写入行 / 总写入行 * 100%'), d.contribution.sub_scores.volume, 100)
+      + miniRow('辅助频率' + helpTip('个人提交数 / 团队提交数 * 100%'), d.contribution.sub_scores.frequency, 100)
+      + miniRow('代码留存率' + helpTip('max(AI 新增行 - 人工删除行, 0) / AI 新增行 * 100%'), d.contribution.sub_scores.survival, 100)
+      + miniRow('活跃度' + helpTip('min(checkpoints / 活跃天数 / 20, 1) * 100%'), d.contribution.sub_scores.activity, 100)
+      + '</div></div>'
+      + '<div class="card"><div class="card-head"><div class="ttl">高频文件 Top 10</div></div><div class="card-body flush"><div class="t-wrap"><table>'
+      + '<thead><tr><th>文件</th><th>编辑</th><th>新增行</th></tr></thead><tbody>'
+      + ((d.file_breakdown || []).map(f => '<tr><td style="font-family:JetBrains Mono;font-size:11px;color:var(--ink-2)">' + esc(f.file) + '</td><td class="tabular">' + f.edits + '</td><td class="tabular">' + f.lines_added + '</td></tr>').join('') || '<tr><td colspan="3" class="empty">无</td></tr>')
+      + '</tbody></table></div></div></div>'
+      + '</div></div>';
+    $('modal').classList.add('show');
+    setTimeout(() => {
+      const daily = d.daily || [];
+      buildChart('ud_daily', 'bar', {
+        labels: daily.map(x => x.date), datasets: [
+          { label: '提交', data: daily.map(x => x.commits), backgroundColor: '#5b8def', borderRadius: 4, stack: 's' },
+          { label: '编辑', data: daily.map(x => x.edits), backgroundColor: '#3fb950', borderRadius: 4, stack: 's' }
+        ]
+      }, { scales: { x: { stacked: true, grid: { display: false } }, y: { stacked: true } } });
+      const ms_ = d.model_breakdown || [];
+      buildChart('ud_models', 'doughnut', {
+        labels: ms_.map(x => x.model), datasets: [{ data: ms_.map(x => x.count), backgroundColor: COLORS, borderWidth: 0 }]
+      }, { cutout: '60%', plugins: { legend: { position: 'right' } } });
+    }, 60);
+  } catch(e){ toast(e.message); }
+}
+function helpTip(text){
+  return ' <i class="tip" data-tip="' + esc(text) + '">?</i>';
+}
+function kpiCard(label, val, sub){
+  return '<div class="card pad"><div style="font-size:11.5px;color:var(--muted);font-weight:700;letter-spacing:.06em;text-transform:uppercase">' + label + '</div>'
+    + '<div style="font-size:28px;font-weight:800;letter-spacing:-.03em;margin-top:6px">' + val + '</div>'
+    + '<div style="font-size:12px;color:var(--muted);margin-top:6px">' + sub + '</div></div>';
+}
+function miniRow(lbl, val, max){
+  return '<div class="mini-row"><div class="lbl">' + lbl + '</div>'
+    + '<div style="display:flex;align-items:center;gap:10px"><div class="bar"><i style="width:' + Math.min(100, val) + '%"></i></div>'
+    + '<div class="num">' + val + '</div></div></div>';
+}
+
+/* ─── Init ─────────────────────────────────────────────────── */
+$('modal').onclick = e => { if(e.target === $('modal')) $('modal').classList.remove('show'); };
+if(auth){ $('login').style.display = 'none'; $('app').style.display = 'flex'; refreshAll(); }
+setInterval(() => { if(auth) $('liveTime').textContent = new Date().toLocaleTimeString('zh-CN'); }, 1000);
+</script>
+</body>
+</html>

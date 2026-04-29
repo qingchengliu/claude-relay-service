@@ -1,0 +1,32 @@
+services:
+  git-collector:
+    build: ./git-collector
+    container_name: ragent-git-collector
+    ports:
+      - "${GIT_AI_PORT:-8000}:8000"
+    volumes:
+      - git_collector_data:/app/data
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DATABASE_URL=sqlite+aiosqlite:///./data/collector.db
+      - DEFAULT_API_KEY=${DEFAULT_API_KEY:-risk-ai}
+      - BASIC_AUTH_USERNAME=${BASIC_AUTH_USERNAME:-admin}
+      - BASIC_AUTH_PASSWORD=${BASIC_AUTH_PASSWORD:-doveliu123}
+      - REPO_URL_INCLUDE_CONTAINS=${REPO_URL_INCLUDE_CONTAINS:-}
+      - INSTALL_GIT_AI_VERSION=${INSTALL_GIT_AI_VERSION:-v1.3.4}
+      - INSTALL_GITHUB_BASE=${INSTALL_GITHUB_BASE:-https://cdn.gh-proxy.org/https://github.com}
+      - INSTALL_GITHUB_BASE_FALLBACK=${INSTALL_GITHUB_BASE_FALLBACK:-https://github.com}
+      - INSTALL_TEAM_NAME=${INSTALL_TEAM_NAME:-风控研发中心}
+      - INSTALL_HOOK_REPAIR_INTERVAL_MIN=${INSTALL_HOOK_REPAIR_INTERVAL_MIN:-15}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=5).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  git_collector_data:
+    driver: local
