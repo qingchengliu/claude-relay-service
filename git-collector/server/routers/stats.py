@@ -1,4 +1,5 @@
 from datetime import datetime, timezone, timedelta
+from collections import Counter
 from pathlib import PurePosixPath, PureWindowsPath
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -139,6 +140,24 @@ def _aggregate_commits(committed: list[tuple]) -> dict:
     totals["ai_code_pct"] = min(100, round(totals["ai_added"] / totals["total_added"] * 100, 1)) if totals["total_added"] > 0 else 0
     totals["ai_added_pct"] = round(totals["ai_added"] / totals["total_added"] * 100, 1) if totals["total_added"] > 0 else 0
     return totals
+
+
+def _tool_model_usage_from_commits(committed: list[tuple]) -> tuple[list[dict], list[dict]]:
+    agents: Counter[str] = Counter()
+    models: Counter[str] = Counter()
+    for (evt_data,) in committed:
+        if not isinstance(evt_data, dict):
+            continue
+        pairs = evt_data.get("tool_model_pairs")
+        if not isinstance(pairs, list) or len(pairs) <= 1:
+            continue
+        for pair in pairs[1:]:
+            agent, model = _split_tool_model(pair)
+            agents[agent] += 1
+            models[model] += 1
+    agent_rows = [{"name": name, "count": count} for name, count in agents.most_common(8)]
+    model_rows = [{"name": name, "count": count} for name, count in models.most_common(8)]
+    return agent_rows, model_rows
 
 
 def _parse_committed(committed: list[tuple]) -> tuple[int, int, int]:
@@ -416,25 +435,8 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
         select(func.count(MetricEvent.id)).where(
             MetricEvent.member_id == m.id, MetricEvent.created_at >= week_ago)) or 0
 
-    # Agent使用分布
-    agc = [MetricEvent.member_id == m.id, MetricEvent.event_data["tool"].isnot(None)]
-    if since: agc.append(MetricEvent.created_at >= since)
-    result = await db.execute(
-        select(MetricEvent.event_data["tool"].as_string(), func.count(MetricEvent.id))
-        .where(*agc)
-        .group_by(MetricEvent.event_data["tool"].as_string())
-        .order_by(func.count(MetricEvent.id).desc()).limit(8))
-    agents = [{"name": a[0] or "unknown", "count": a[1]} for a in result.all()]
-
-    # 模型使用分布
-    mc = [MetricEvent.member_id == m.id, MetricEvent.event_data["model"].isnot(None)]
-    if since: mc.append(MetricEvent.created_at >= since)
-    result = await db.execute(
-        select(MetricEvent.event_data["model"].as_string(), func.count(MetricEvent.id))
-        .where(*mc)
-        .group_by(MetricEvent.event_data["model"].as_string())
-        .order_by(func.count(MetricEvent.id).desc()).limit(8))
-    models = [{"name": a[0] or "unknown", "count": a[1]} for a in result.all()]
+    # Agent/模型偏好按已提交到 git 的 commit 明细统计，避免把过程事件里的 unknown 算进去。
+    agents, models = _tool_model_usage_from_commits(committed)
 
     total_lines = commit_totals["total_added"]
     ai_pct = commit_totals["ai_code_pct"]

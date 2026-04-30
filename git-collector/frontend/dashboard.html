@@ -531,7 +531,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
           <thead><tr>
             <th style="width:36px">#</th><th>成员</th><th>AI 代码行 <i class="tip" data-tip="SUM(ai_additions)，最终进入 commit 的 AI 代码行">?</i></th><th>新增代码行 <i class="tip" data-tip="SUM(git_diff_added_lines)">?</i></th>
             <th>AI 占比 <i class="tip" data-tip="git 提交中的 AI 采纳行占比：SUM(ai_additions) / SUM(git_diff_added_lines) * 100%">?</i></th><th>提交</th>
-            <th>Agent 编辑</th><th>Prompt <i class="tip" data-tip="COUNT(CAS/Bundle messages WHERE role='user')">?</i></th><th>偏好模型 <i class="tip" data-tip="COUNT(DISTINCT model)">?</i></th><th>偏好 Agent</th>
+            <th>Agent 编辑</th><th>Prompt <i class="tip" data-tip="COUNT(CAS/Bundle messages WHERE role='user')">?</i></th><th>偏好模型 <i class="tip" data-tip="COUNT(DISTINCT commit.tool_model_pairs.model)，只统计已提交到 git 的模型">?</i></th><th>偏好 Agent <i class="tip" data-tip="COUNT(DISTINCT commit.tool_model_pairs.agent)，只统计已提交到 git 的 Agent">?</i></th>
           </tr></thead>
           <tbody id="rankingBody"></tbody>
         </table></div></div>
@@ -1280,7 +1280,7 @@ async function showUser(id){
       + '<div class="grid-3" style="margin-bottom:18px">'
       + kpiCard('评分' + helpTip('评分 = 代码量*50% + 辅助频率*30% + 活跃度*20%'), d.contribution.score, '<span class="lvl-tag lvl-' + d.contribution.level + '">' + d.contribution.level + '</span> 等级' + helpTip('S>=80；A>=60；B>=40；C>=20；D<20'))
       + kpiCard('AI 代码行', fmt(d.ai_edit_lines || 0), '占比 ' + pct(acc) + ' · 纯 AI ' + fmt(d.ai_accepted_lines || 0) + ' · 混合 ' + fmt(d.mixed_added_lines || 0))
-      + kpiCard('提交 / Agent 编辑', d.commit_count + ' / ' + d.edit_count, 'Prompt ' + fmt(d.prompt_message_count || 0) + ' 条 · 模型 ' + ((d.models || []).length) + ' 个' + helpTip('COUNT(DISTINCT model)'))
+      + kpiCard('提交 / Agent 编辑', d.commit_count + ' / ' + d.edit_count, 'Prompt ' + fmt(d.prompt_message_count || 0) + ' 条 · 模型 ' + ((d.models || []).length) + ' 个' + helpTip('COUNT(DISTINCT commit.tool_model_pairs.model)，只统计已提交到 git 的模型'))
       + '</div>'
       + '<div class="grid-2" style="margin-bottom:18px">'
       + '<div class="card"><div class="card-head"><div class="ttl">每日活动</div></div><div class="chart-wrap sm"><canvas id="ud_daily"></canvas></div></div>'
