@@ -244,7 +244,11 @@ def calc_score(ai_lines: int, total_lines: int, commits: int, total_commits: int
 #  /overview
 # ============================================================
 @router.get("/overview")
-async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
+async def overview(
+    days: int = Query(default=0, description="0=全部, 1=当日, 7/30=近N天"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
     team = await get_team(db, api_key)
     if not team:
         return {"member_count": 0, "total_commits": 0, "total_events": 0,
@@ -258,8 +262,21 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
                 "agent_edit_count": 0, "prompt_message_count": 0}
 
     member_ids = await get_member_ids(db, team.id)
-    total_cas = await db.scalar(select(func.count(CasObject.id))) or 0
-    total_bundles = await db.scalar(select(func.count(Bundle.id))) or 0
+    since = _since_for_days(days)
+    event_conds = [MetricEvent.member_id.in_(member_ids)]
+    commit_conds = [*event_conds, MetricEvent.event_type == 1]
+    edit_conds = [*event_conds, MetricEvent.event_type == 4]
+    cas_conds = [CasObject.member_id.in_(member_ids)]
+    bundle_conds = [Bundle.member_id.in_(member_ids)]
+    if since:
+        event_conds.append(MetricEvent.created_at >= since)
+        commit_conds.append(MetricEvent.created_at >= since)
+        edit_conds.append(MetricEvent.created_at >= since)
+        cas_conds.append(CasObject.created_at >= since)
+        bundle_conds.append(Bundle.created_at >= since)
+
+    total_cas = await db.scalar(select(func.count(CasObject.id)).where(*cas_conds)) or 0
+    total_bundles = await db.scalar(select(func.count(Bundle.id)).where(*bundle_conds)) or 0
 
     if not member_ids:
         return {"member_count": 0, "total_commits": 0, "total_events": 0,
@@ -272,11 +289,9 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
                 "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
                 "agent_edit_count": 0, "prompt_message_count": 0}
 
-    total_events = await db.scalar(
-        select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids))) or 0
+    total_events = await db.scalar(select(func.count(MetricEvent.id)).where(*event_conds)) or 0
     # Committed events
-    result = await db.execute(
-        select(MetricEvent.event_data).where(MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 1))
+    result = await db.execute(select(MetricEvent.event_data).where(*commit_conds))
     committed = [(evt_data,) for (evt_data,) in result.all()]
     commit_totals = _aggregate_commits(committed)
     ai_lines = commit_totals["ai_added"]
@@ -284,23 +299,26 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
     human = commit_totals["human_added"]
     total_commits = len(committed)
 
-    total_edit_count = await db.scalar(
-        select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 4)) or 0
+    total_edit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*edit_conds)) or 0
     ai_edit_count = await db.scalar(
         select(func.count(MetricEvent.id)).where(
-            MetricEvent.member_id.in_(member_ids),
-            MetricEvent.event_type == 4,
+            *edit_conds,
             MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS)),
         )) or 0
-    prompt_message_count = await _prompt_count_for_members(db, member_ids)
+    prompt_message_count = await _prompt_count_for_members(db, member_ids, since)
 
     now_ts = datetime.now(timezone.utc)
     week_ago = now_ts - timedelta(days=7)
     month_ago = now_ts - timedelta(days=30)
-    active_7d = (await db.execute(
+    active_base = [MetricEvent.member_id.in_(member_ids)]
+    if since:
+        active_base.append(MetricEvent.created_at >= since)
+    active_in_range = (await db.execute(
+        select(func.count(func.distinct(MetricEvent.member_id))).where(*active_base))).scalar() or 0
+    active_7d = active_in_range if since else (await db.execute(
         select(func.count(func.distinct(MetricEvent.member_id))).where(
             MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= week_ago))).scalar() or 0
-    active_30d = (await db.execute(
+    active_30d = active_in_range if since else (await db.execute(
         select(func.count(func.distinct(MetricEvent.member_id))).where(
             MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= month_ago))).scalar() or 0
 

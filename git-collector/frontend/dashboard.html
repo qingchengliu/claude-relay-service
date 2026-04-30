@@ -788,7 +788,7 @@ async function refreshAll(){
   try {
     const days = $('globalDays').value;
     const arr = await Promise.all([
-      api('/api/stats/overview'),
+      api('/api/stats/overview?days=' + days),
       api('/api/stats/ranking?days=' + days),
       api('/api/stats/members'),
       api('/api/stats/agents'),
