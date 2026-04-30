@@ -1,5 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from collections import Counter
+from zoneinfo import ZoneInfo
 from pathlib import PurePosixPath, PureWindowsPath
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,6 +31,20 @@ async def get_member_ids(db: AsyncSession, team_id: str) -> list[str]:
 
 
 AI_KINDS = {"ai_agent", "ai_tab"}
+LOCAL_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _since_for_days(days: int) -> datetime | None:
+    if days <= 0:
+        return None
+    if days == 1:
+        today = datetime.now(LOCAL_TZ).replace(hour=0, minute=0, second=0, microsecond=0)
+        return today.astimezone(timezone.utc)
+    return datetime.now(timezone.utc) - timedelta(days=days)
+
+
+def _start_for_days(days: int, default_days: int = 30) -> datetime:
+    return _since_for_days(days) or (datetime.now(timezone.utc) - timedelta(days=default_days))
 
 
 def _sum_num(value) -> int:
@@ -336,14 +351,14 @@ async def overview(db: AsyncSession = Depends(get_db), api_key: str = Header(Non
 # ============================================================
 @router.get("/users")
 async def users(
-    days: int = Query(default=0, description="0=全部, 1/7/30=筛选周期"),
+    days: int = Query(default=0, description="0=全部, 1=当日, 7/30=近N天"),
     db: AsyncSession = Depends(get_db),
     api_key: str = Header(None, alias="X-API-Key"),
 ):
     team = await get_team(db, api_key)
     if not team: return {"users": [], "total": 0}
 
-    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+    since = _since_for_days(days)
 
     result = await db.execute(
         select(Member).where(Member.team_id == team.id).order_by(Member.created_at.desc()).limit(100))
@@ -371,7 +386,7 @@ async def user_detail(
     member = result.scalar_one_or_none()
     if not member: return {"error": "User not found"}
 
-    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+    since = _since_for_days(days)
     detail = await _build_user_detail(db, member, since)
     detail["daily"] = await _build_user_daily(db, member.id)
     detail["model_breakdown"] = await _build_user_models(db, member.id, since)
@@ -573,14 +588,14 @@ async def _build_user_files(db: AsyncSession, member_id: str) -> list[dict]:
 # ============================================================
 @router.get("/ranking")
 async def ranking(
-    days: int = Query(default=0, description="0=全部, 1=当天, 7=7天, 30=30天"),
+    days: int = Query(default=0, description="0=全部, 1=当日, 7=近7天, 30=近30天"),
     db: AsyncSession = Depends(get_db),
     api_key: str = Header(None, alias="X-API-Key"),
 ):
     team = await get_team(db, api_key)
     if not team: return {"ranking": []}
 
-    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+    since = _since_for_days(days)
 
     result = await db.execute(select(Member).where(Member.team_id == team.id).limit(100))
     members = result.scalars().all()
@@ -630,7 +645,7 @@ async def timeline(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"timeline": []}
 
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    start_date = _start_for_days(days)
 
     if member_id and member_id in member_ids:
         # 单用户视图
@@ -727,7 +742,7 @@ async def models(db: AsyncSession = Depends(get_db), api_key: str = Header(None,
 # ============================================================
 @router.get("/agent-model-pivot")
 async def agent_model_pivot(
-    days: int = Query(default=0, description="0=全部, 1/7/30=筛选周期"),
+    days: int = Query(default=0, description="0=全部, 1=当日, 7/30=近N天"),
     db: AsyncSession = Depends(get_db),
     api_key: str = Header(None, alias="X-API-Key"),
 ):
@@ -741,7 +756,7 @@ async def agent_model_pivot(
         MetricEvent.event_type == 1,
     ]
     if days > 0:
-        conds.append(MetricEvent.created_at >= datetime.now(timezone.utc) - timedelta(days=days))
+        conds.append(MetricEvent.created_at >= _start_for_days(days))
     result = await db.execute(select(MetricEvent.member_id, MetricEvent.event_data).where(*conds))
 
     rows: dict[tuple[str, str], dict] = {}
@@ -870,7 +885,7 @@ async def efficiency_trend(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"trend": []}
 
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    start_date = _start_for_days(days)
 
     if member_id and member_id in member_ids:
         # ---------- 单人趋势 ----------
@@ -972,7 +987,7 @@ async def ai_code_trend(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"trend": []}
 
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    start_date = _start_for_days(days)
     mids = [member_id] if member_id and member_id in member_ids else member_ids
     result = await db.execute(
         select(func.date(MetricEvent.created_at), MetricEvent.event_data)
@@ -1020,7 +1035,7 @@ async def language_trend(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"trend": []}
 
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    start_date = _start_for_days(days)
     result = await db.execute(
         select(func.date(MetricEvent.created_at), MetricEvent.event_data)
         .where(MetricEvent.member_id.in_(member_ids),
@@ -1048,7 +1063,7 @@ async def language_trend(
 # ============================================================
 @router.get("/repo-stats")
 async def repo_stats(
-    days: int = Query(default=0, description="0=全部, 1/7/30=筛选周期"),
+    days: int = Query(default=0, description="0=全部, 1=当日, 7/30=近N天"),
     db: AsyncSession = Depends(get_db),
     api_key: str = Header(None, alias="X-API-Key"),
 ):
@@ -1057,7 +1072,7 @@ async def repo_stats(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"repos": []}
 
-    since = (datetime.now(timezone.utc) - timedelta(days=days)) if days > 0 else None
+    since = _since_for_days(days)
 
     # 基本统计: 按仓库聚合 (top 15)
     base_query = text("""
@@ -1162,7 +1177,7 @@ async def time_distribution(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"distribution": [], "peak_hours": []}
 
-    start_date = datetime.now(timezone.utc) - timedelta(days=days)
+    start_date = _start_for_days(days)
 
     if member_id and member_id in member_ids:
         query = text("""

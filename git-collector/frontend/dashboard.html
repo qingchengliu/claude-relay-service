@@ -366,6 +366,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
     <div class="bar-actions">
       <span class="live-pill"><span class="live-dot"></span><span id="liveTime">--:--:--</span></span>
       <select class="select" id="globalDays" onchange="refreshAll()">
+        <option value="1">当日</option>
         <option value="7">近 7 天</option>
         <option value="14">近 14 天</option>
         <option value="30" selected>近 30 天</option>
@@ -1133,7 +1134,7 @@ function renderTimeline(d){
 function renderActiveUsers(d){
   const tl = d.timeline || [];
   const days = $('globalDays').value || 30;
-  $('activeUsersWindow').textContent = '仅近 ' + days + ' 天 · Checkpoint/Commit 活跃';
+  $('activeUsersWindow').textContent = (days === '1' ? '仅当日' : '仅近 ' + days + ' 天') + ' · Checkpoint/Commit 活跃';
   buildChart('activeUsersChart', 'line', {
     labels: tl.map(x => x.date),
     datasets: [{
