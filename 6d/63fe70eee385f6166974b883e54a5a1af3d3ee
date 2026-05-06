@@ -1,0 +1,28 @@
+git-collector/frontend/dashboard.html
+  5519f226f933db68 792,797-799,803
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "6d63fe70eee385f6166974b883e54a5a1af3d3ee",
+  "prompts": {
+    "5519f226f933db68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "838010b7-cea6-48e1-b727-9e7a7c152cb7",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 5,
+      "accepted_lines": 5,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/5c2b11b820372672f3b87084bcb94bdecd7c59773088e0c587f516c1efb6cd27",
+      "custom_attributes": {
+        "user": "doveliu",
+        "team": "风控研发中心"
+      }
+    }
+  }
+}
