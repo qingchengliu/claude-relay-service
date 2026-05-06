@@ -1463,3 +1463,166 @@ async def time_distribution(
     peak_hours = [h["hour"] for h in sorted_hours[:3] if h["events"] > 0]
 
     return {"distribution": distribution, "peak_hours": peak_hours}
+
+
+# ============================================================
+#  /dashboard 聚合接口 - 一次查询返回所有面板数据
+#  消除 12 路并行 HTTP 请求导致的 SQLite 锁争用
+# ============================================================
+@router.get("/dashboard")
+async def dashboard_data(
+    days: int = Query(default=30, le=365, description="0=全部, 1=当日, 7/30=近N天"),
+    db: AsyncSession = Depends(get_db),
+    api_key: str = Header(None, alias="X-API-Key"),
+):
+    team = await get_team(db, api_key)
+    if not team:
+        return {"error": "No team found"}
+
+    member_ids = await get_member_ids(db, team.id)
+    since = _since_for_days(days) if days > 0 else None
+    start_date = _start_for_days(days) if days > 0 else (datetime.now(timezone.utc) - timedelta(days=30))
+
+    # 基础条件
+    event_conds = [MetricEvent.member_id.in_(member_ids)]
+    commit_conds = [*event_conds, MetricEvent.event_type == 1]
+    edit_conds = [*event_conds, MetricEvent.event_type == 4]
+    if since:
+        event_conds.append(MetricEvent.created_at >= since)
+        commit_conds.append(MetricEvent.created_at >= since)
+        edit_conds.append(MetricEvent.created_at >= since)
+
+    # 成员
+    result = await db.execute(select(Member).where(Member.team_id == team.id).order_by(Member.created_at.desc()).limit(100))
+    members = result.scalars().all()
+    member_ids_active = [m.id for m in members]
+
+    # === overview - 只做必要的查询 ===
+    total_cas = await db.scalar(select(func.count(CasObject.id)).where(CasObject.member_id.in_(member_ids_active))) or 0
+    total_bundles = await db.scalar(select(func.count(Bundle.id)).where(Bundle.member_id.in_(member_ids_active))) or 0
+    total_events = await db.scalar(select(func.count(MetricEvent.id)).where(*event_conds)) or 0
+
+    result = await db.execute(select(MetricEvent.event_data).where(*commit_conds))
+    committed = [(evt_data,) for (evt_data,) in result.all()]
+    commit_totals = _aggregate_commits(committed)
+    total_commits = len(committed)
+
+    total_edit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*edit_conds)) or 0
+    ai_edit_count = await db.scalar(
+        select(func.count(MetricEvent.id)).where(*edit_conds, MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS)))) or 0
+
+    prompt_message_count = await _prompt_count_for_members(db, member_ids_active, since)
+
+    now_ts = datetime.now(timezone.utc)
+    week_ago = now_ts - timedelta(days=7)
+    month_ago = now_ts - timedelta(days=30)
+    active_7d = await db.scalar(select(func.count(func.distinct(MetricEvent.member_id))).where(MetricEvent.member_id.in_(member_ids_active), MetricEvent.created_at >= week_ago)) or 0
+    active_30d = await db.scalar(select(func.count(func.distinct(MetricEvent.member_id))).where(MetricEvent.member_id.in_(member_ids_active), MetricEvent.created_at >= month_ago)) or 0
+
+    ai_lines = commit_totals["ai_added"]
+    human = commit_totals["human_added"]
+    total_all = ai_lines + human
+    acc_rate = round(ai_lines / total_all * 100, 1) if total_all > 0 else 0
+    team_score = acc_rate * 0.60 + min(active_7d / max(1, len(member_ids_active)) * 100, 100) * 0.40
+
+    p1_start = week_ago - timedelta(days=7)
+    p1 = await db.scalar(select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids_active), MetricEvent.created_at >= p1_start, MetricEvent.created_at < week_ago)) or 0
+    p2 = await db.scalar(select(func.count(MetricEvent.id)).where(MetricEvent.member_id.in_(member_ids_active), MetricEvent.created_at >= week_ago)) or 0
+    if p1 > 0:
+        chg = (p2 - p1) / p1
+        trend = "up" if chg > 0.15 else "down" if chg < -0.15 else "stable"
+    else:
+        trend = "up" if p2 > 0 else "stable"
+
+    overview_data = {
+        "member_count": len(member_ids_active), "total_commits": total_commits,
+        "total_events": total_events, "total_edit_count": total_edit_count,
+        "total_cas": total_cas, "total_bundles": total_bundles,
+        "active_users_7d": active_7d, "active_users_30d": active_30d,
+        "ai_acceptance_rate": acc_rate,
+        "total_ai_lines": ai_lines, "total_human_lines": human,
+        "total_ai_deleted": commit_totals["ai_deleted"],
+        "mixed_added_lines": commit_totals["mixed_added"],
+        "ai_accepted_lines": commit_totals["ai_accepted"],
+        "ai_activity_lines": commit_totals["ai_activity"],
+        "total_added_lines": commit_totals["total_added"],
+        "total_deleted_lines": commit_totals["total_deleted"],
+        "total_edit_lines": commit_totals["total_edit"],
+        "ai_edit_lines": commit_totals["ai_edit"],
+        "ai_code_pct": commit_totals["ai_code_pct"],
+        "agent_edit_count": ai_edit_count,
+        "prompt_message_count": prompt_message_count,
+        "team_ai_score": round(team_score, 1), "trend": trend,
+        "avg_ai_lines_per_commit": round(ai_lines / total_commits) if total_commits > 0 else 0,
+    }
+
+    # === ranking - 复用 batch_member_details ===
+    details = await _batch_member_details(db, list(members), since)
+    ranking_list = []
+    for m in members:
+        d = details.get(m.id)
+        if not d: continue
+        ranking_list.append({
+            "id": m.id, "name": m.name, "distinct_id": m.distinct_id,
+            "contribution": d["contribution"],
+            "ai_lines": d["ai_lines"], "human_lines": d["human_lines"],
+            "ai_pct": d["ai_pct"], "ai_code_pct": d["ai_code_pct"],
+            "total_added_lines": d["total_added_lines"],
+            "total_edit_lines": d["total_edit_lines"],
+            "ai_edit_lines": d["ai_edit_lines"],
+            "prompt_message_count": d["prompt_message_count"],
+            "commits": d["commit_count"], "edits": d["edit_count"],
+            "active_days": d["active_days"],
+            "agents_used": len(d["agents"]), "models_used": len(d["models"]),
+        })
+    ranking_list.sort(key=lambda x: (x["ai_lines"], x["ai_code_pct"], x["commits"]), reverse=True)
+    for i, item in enumerate(ranking_list): item["rank"] = i + 1
+
+    # === repos ===
+    repo_query = text("""
+        SELECT repo_url, COUNT(*) as commits,
+               COUNT(DISTINCT member_id) as contributors, MAX(created_at) as last_act,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND repo_url IS NOT NULL AND repo_url != ''
+        GROUP BY repo_url ORDER BY commits DESC LIMIT 20
+    """)
+    repo_result = await db.execute(repo_query, {"tid": team.id})
+    repos_list = [{"repo_url": r[0], "commit_count": r[1], "contributor_count": r[2],
+                   "last_activity": str(r[3]) if r[3] else None, "edit_count": r[4]} for r in repo_result.all()]
+
+    # === models (lightweight) ===
+    models_query = text("""
+        SELECT json_extract(event_data, '$.model') as m, COUNT(*) as c,
+               COUNT(DISTINCT member_id) as u
+        FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND json_extract(event_data, '$.model') IS NOT NULL AND json_extract(event_data, '$.model') != ''
+        GROUP BY m ORDER BY c DESC LIMIT 20
+    """)
+    models_result = await db.execute(models_query, {"tid": team.id})
+    models_list = [{"name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2]} for r in models_result.all()]
+
+    # === timeline ===
+    timeline_query = text("""
+        SELECT DATE(created_at) as day, COUNT(*) as events,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+               SUM(CASE WHEN event_type = 2 THEN 1 ELSE 0 END) as agent_usages,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits,
+               COUNT(DISTINCT member_id) as unique_users
+        FROM metric_events
+        WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND created_at >= :sd GROUP BY DATE(created_at) ORDER BY day ASC
+    """)
+    timeline_result = await db.execute(timeline_query, {"tid": team.id, "sd": start_date.isoformat()})
+    timeline_list = [{"date": r[0], "events": r[1], "commits": r[2], "agent_usages": r[3],
+                      "edits": r[4], "unique_users": r[5]} for r in timeline_result.all()]
+
+    return {
+        "overview": overview_data,
+        "ranking": ranking_list,
+        "total_ranking": len(ranking_list),
+        "repos": repos_list,
+        "models": models_list,
+        "timeline": timeline_list,
+    }

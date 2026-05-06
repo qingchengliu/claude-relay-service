@@ -787,39 +787,48 @@ async function refreshAll(){
   document.body.classList.add('loading');
   try {
     const days = $('globalDays').value;
-    const arr = await Promise.all([
-      api('/api/stats/overview?days=' + days),
-      api('/api/stats/ranking?days=' + days),
+    const d = days || 30;
+
+    // 主数据: 一次聚合查询替代 12 路并行，消除 SQLite 锁争用
+    const dash = await api('/api/stats/dashboard?days=' + days);
+    state.overview = dash.overview;
+    state.ranking = dash.ranking || [];
+    state.models_data = dash.models || [];
+
+    // 轻量补充数据
+    const [membersRes, agentsRes, weeklyRes, trendRes, langRes] = await Promise.all([
       api('/api/stats/members'),
       api('/api/stats/agents'),
-      api('/api/stats/models'),
-      api('/api/stats/timeline?days=' + (days || 30)),
-      api('/api/stats/ai-code-trend?days=' + (days || 30)),
-      api('/api/stats/time-distribution?days=' + (days || 30)),
-      api('/api/stats/repo-stats?days=' + days),
       api('/api/stats/weekly'),
-      api('/api/stats/language-trend?days=' + (days || 30)),
-      api('/api/stats/agent-model-pivot?days=' + days)
+      api('/api/stats/ai-code-trend?days=' + d),
+      api('/api/stats/language-trend?days=' + d),
     ]);
-    state.overview = arr[0]; state.ranking = arr[1].ranking || []; state.members = arr[2].members || [];
-    renderBanner(arr[0], arr[6].trend || [], arr[4].models || []);
-    renderFunnel(arr[0], state.ranking);
+    state.members = membersRes.members || [];
+    const agentsData = agentsRes.agents || [];
+    const weeklyData = weeklyRes.weeks || [];
+    const trendData = trendRes.trend || [];
+    const langData = langRes.trend || [];
+
+    // 时间分布 (可选)
+    const distRes = await api('/api/stats/time-distribution?days=' + d);
+
+    renderBanner(dash.overview, trendData, dash.models);
+    renderFunnel(dash.overview, state.ranking);
     renderQuadrant(state.ranking);
     renderAdoptionWall(state.ranking);
     renderTopPerformers(state.ranking);
     renderRanking(state.ranking);
     renderPeopleStats(state.ranking);
-    renderLines(arr[0]);
-    renderEfficiency(arr[6]);
-    renderActiveUsers(arr[5]);
-    renderTimeline(arr[5]);
-    renderHeatmap(arr[7]);
-    renderRepos(arr[8]);
-    renderWeekly(arr[9]);
-    renderLanguageTrend(arr[10]);
-    renderAgents(arr[3]);
-    renderModels(arr[4]);
-    renderAgentModelPivot(arr[11]);
+    renderLines(dash.overview);
+    renderEfficiency(trendRes);
+    renderActiveUsers({timeline: dash.timeline || []});
+    renderTimeline({timeline: dash.timeline || []});
+    renderHeatmap(distRes);
+    renderRepos({repos: dash.repos || []});
+    renderWeekly({weeks: weeklyData});
+    renderLanguageTrend({trend: langData});
+    renderAgents({agents: agentsData});
+    renderModels({models: dash.models || []});
     populateMemberSelectors();
     $('apiStatus').textContent = '已同步 · ' + state.members.length + ' 成员 · ' + (state.ranking.length) + ' 活跃';
     $('liveTime').textContent = new Date().toLocaleTimeString('zh-CN');
