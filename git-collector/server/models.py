@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON, Index
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -60,6 +60,9 @@ class CasObject(Base):
     api_version = Column(String(16), nullable=True, default="v1")
     member_id = Column(String(36), ForeignKey("members.id"), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=now)
+    __table_args__ = (
+        Index("ix_cas_objects_member_created", "member_id", "created_at"),
+    )
 
 
 class MetricEvent(Base):
@@ -72,6 +75,10 @@ class MetricEvent(Base):
     commit_sha = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=now, index=True)
     member = relationship("Member", back_populates="metric_events", lazy="selectin")
+    __table_args__ = (
+        Index("ix_metric_events_member_type_created", "member_id", "event_type", "created_at"),
+        Index("ix_metric_events_repo_url", "repo_url"),
+    )
 
 
 class Bundle(Base):
@@ -82,3 +89,6 @@ class Bundle(Base):
     data = Column(JSON, nullable=False)
     bundle_url = Column(String(1024), nullable=True)
     created_at = Column(DateTime, nullable=False, default=now)
+    __table_args__ = (
+        Index("ix_bundles_member_created", "member_id", "created_at"),
+    )

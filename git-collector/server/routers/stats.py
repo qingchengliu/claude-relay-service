@@ -103,7 +103,6 @@ def _commit_metrics(evt_data: dict) -> dict:
             "total_added": 0, "total_deleted": 0, "total_edit": 0,
             "ai_edit": 0, "non_ai_added": 0,
         }
-    # ai_additions 是最终进入 commit 的 AI 代码；total_ai_* 是过程活动量，不能用于代码占比。
     ai_added = _metric_total(evt_data.get("ai_additions"))
     mixed_added = _metric_total(evt_data.get("mixed_additions"))
     ai_accepted = _metric_total(evt_data.get("ai_accepted"))
@@ -176,47 +175,8 @@ def _tool_model_usage_from_commits(committed: list[tuple]) -> tuple[list[dict], 
 
 
 def _parse_committed(committed: list[tuple]) -> tuple[int, int, int]:
-    """返回: (AI新增行, AI删除行, 人工新增行)"""
     totals = _aggregate_commits(committed)
     return totals["ai_added"], totals["ai_deleted"], totals["human_added"]
-
-
-def _prompt_user_message_count(payload) -> int:
-    if isinstance(payload, list):
-        return sum(_prompt_user_message_count(item) for item in payload)
-    if not isinstance(payload, dict):
-        return 0
-    count = 0
-    messages = payload.get("messages")
-    if isinstance(messages, list):
-        for msg in messages:
-            if not isinstance(msg, dict):
-                continue
-            role = str(msg.get("role") or msg.get("type") or msg.get("author") or "").lower()
-            if role in {"user", "human"}:
-                count += 1
-    for key, value in payload.items():
-        if key != "messages":
-            count += _prompt_user_message_count(value)
-    return count
-
-
-async def _prompt_count_for_members(db: AsyncSession, member_ids: list[str], since: datetime | None = None) -> int:
-    if not member_ids:
-        return 0
-    cas_conds = [CasObject.member_id.in_(member_ids)]
-    bundle_conds = [Bundle.member_id.in_(member_ids)]
-    if since:
-        cas_conds.append(CasObject.created_at >= since)
-        bundle_conds.append(Bundle.created_at >= since)
-    cas_result = await db.execute(select(CasObject.content).where(*cas_conds))
-    bundle_result = await db.execute(select(Bundle.data).where(*bundle_conds))
-    return sum(_prompt_user_message_count(r[0]) for r in cas_result.all()) + \
-        sum(_prompt_user_message_count(r[0]) for r in bundle_result.all())
-
-
-async def _prompt_count_for_member(db: AsyncSession, member_id: str, since: datetime | None = None) -> int:
-    return await _prompt_count_for_members(db, [member_id], since)
 
 
 def _file_ext(path: str | None) -> str:
@@ -238,6 +198,216 @@ def calc_score(ai_lines: int, total_lines: int, commits: int, total_commits: int
             "sub_scores": {"volume": round(vol, 1), "frequency": round(freq, 1),
                            "activity": round(act, 1)}}
 
+
+# ============================================================
+#  高性能 prompt 消息计数 - 使用 SQLite json_each 在 DB 内统计
+#  避免将数 MB 的 JSON 加载到 Python 内存中递归解析
+# ============================================================
+
+async def _prompt_count_for_members(db: AsyncSession, member_ids: list[str], since: datetime | None = None) -> int:
+    """在 SQLite DB 内使用 json_each 统计 user/human 消息数，不加载完整 JSON 到 Python。"""
+    if not member_ids:
+        return 0
+    placeholders = ",".join(f":mid{i}" for i in range(len(member_ids)))
+    params = {f"mid{i}": mid for i, mid in enumerate(member_ids)}
+
+    cas_sql = f"""
+        SELECT COUNT(*) FROM cas_objects, json_each(cas_objects.content, '$.messages')
+        WHERE cas_objects.member_id IN ({placeholders})
+          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
+    """
+    bundle_sql = f"""
+        SELECT COUNT(*) FROM bundles, json_each(bundles.data, '$.messages')
+        WHERE bundles.member_id IN ({placeholders})
+          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
+    """
+    if since:
+        cas_sql += " AND cas_objects.created_at >= :since"
+        bundle_sql += " AND bundles.created_at >= :since"
+        params["since"] = since.isoformat()
+
+    cas_count = (await db.execute(text(cas_sql), params)).scalar() or 0
+    bundle_count = (await db.execute(text(bundle_sql), params)).scalar() or 0
+    return cas_count + bundle_count
+
+
+async def _prompt_count_for_member(db: AsyncSession, member_id: str, since: datetime | None = None) -> int:
+    return await _prompt_count_for_members(db, [member_id], since)
+
+
+async def _prompt_count_by_member(db: AsyncSession, member_ids: list[str], since: datetime | None = None) -> dict[str, int]:
+    """按成员分组统计 prompt 消息数，一次查询返回 {member_id: count}。"""
+    if not member_ids:
+        return {}
+    placeholders = ",".join(f":mid{i}" for i in range(len(member_ids)))
+    params = {f"mid{i}": mid for i, mid in enumerate(member_ids)}
+
+    cas_sql = f"""
+        SELECT cas_objects.member_id, COUNT(*) as cnt
+        FROM cas_objects, json_each(cas_objects.content, '$.messages')
+        WHERE cas_objects.member_id IN ({placeholders})
+          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
+    """
+    bundle_sql = f"""
+        SELECT bundles.member_id, COUNT(*) as cnt
+        FROM bundles, json_each(bundles.data, '$.messages')
+        WHERE bundles.member_id IN ({placeholders})
+          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
+    """
+    if since:
+        cas_sql += " AND cas_objects.created_at >= :since"
+        bundle_sql += " AND bundles.created_at >= :since"
+        params["since"] = since.isoformat()
+
+    result = {}
+    for mid, cnt in (await db.execute(text(cas_sql), params)).all():
+        result[mid] = result.get(mid, 0) + (cnt or 0)
+    for mid, cnt in (await db.execute(text(bundle_sql), params)).all():
+        result[mid] = result.get(mid, 0) + (cnt or 0)
+    return result
+
+
+async def _prompt_count_by_repo(db: AsyncSession, repo_urls: list[str], since: datetime | None = None) -> dict[str, int]:
+    """按仓库分组统计 prompt 消息数。"""
+    if not repo_urls:
+        return {}
+    placeholders = ",".join(f":r{i}" for i in range(len(repo_urls)))
+    params = {f"r{i}": r for i, r in enumerate(repo_urls)}
+
+    sql = f"""
+        SELECT cas_objects.repo_url, COUNT(*) as cnt
+        FROM cas_objects, json_each(cas_objects.content, '$.messages')
+        WHERE cas_objects.repo_url IN ({placeholders})
+          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
+    """
+    if since:
+        sql += " AND cas_objects.created_at >= :since"
+        params["since"] = since.isoformat()
+
+    return {r[0]: r[1] or 0 for r in (await db.execute(text(sql), params)).all()}
+
+
+# ============================================================
+#  批量加载成员详情 - 消除 N+1 查询
+# ============================================================
+
+async def _batch_member_details(db: AsyncSession, members: list[Member], since: datetime | None = None) -> dict[str, dict]:
+    """一次批量查询加载所有成员的详情数据，替代逐成员调用 _build_user_detail。"""
+    if not members:
+        return {}
+
+    member_ids = [m.id for m in members]
+    now_ts = datetime.now(timezone.utc)
+    week_ago = now_ts - timedelta(days=7)
+
+    # 1. 团队总提交数 (所有成员)
+    team_commit_conds = [MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 1]
+    if since: team_commit_conds.append(MetricEvent.created_at >= since)
+    team_commit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*team_commit_conds)) or 0
+
+    # 2. 批量加载所有成员的 commit event_data
+    commit_conds = [MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 1]
+    if since: commit_conds.append(MetricEvent.created_at >= since)
+    result = await db.execute(select(MetricEvent.member_id, MetricEvent.event_data).where(*commit_conds))
+    commits_by_member: dict[str, list[tuple]] = {}
+    for mid, evt_data in result.all():
+        commits_by_member.setdefault(mid, []).append((evt_data,))
+
+    # 3. 批量 checkpoint 计数
+    cc = [MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 4]
+    if since: cc.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.member_id, func.count(MetricEvent.id)).where(*cc).group_by(MetricEvent.member_id))
+    checkpoint_counts = {r[0]: r[1] for r in result.all()}
+
+    # 4. 批量 AI edit 计数
+    ai_cc = [
+        MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 4,
+        MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS)),
+    ]
+    if since: ai_cc.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.member_id, func.count(MetricEvent.id)).where(*ai_cc).group_by(MetricEvent.member_id))
+    edit_counts = {r[0]: r[1] for r in result.all()}
+
+    # 5. 批量 agent usage 计数
+    ac = [MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 2]
+    if since: ac.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.member_id, func.count(MetricEvent.id)).where(*ac).group_by(MetricEvent.member_id))
+    agent_usage_counts = {r[0]: r[1] for r in result.all()}
+
+    # 6. 批量活跃天数
+    adc = [MetricEvent.member_id.in_(member_ids)]
+    if since: adc.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.member_id, func.count(func.distinct(func.date(MetricEvent.created_at))))
+        .where(*adc).group_by(MetricEvent.member_id))
+    active_days_map = {r[0]: r[1] for r in result.all()}
+
+    # 7. 批量仓库数
+    rc = [MetricEvent.member_id.in_(member_ids), MetricEvent.repo_url.isnot(None)]
+    if since: rc.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.member_id, func.count(func.distinct(MetricEvent.repo_url)))
+        .where(*rc).group_by(MetricEvent.member_id))
+    repo_counts = {r[0]: r[1] for r in result.all()}
+
+    # 8. 批量最近活跃时间
+    result = await db.execute(
+        select(MetricEvent.member_id, func.max(MetricEvent.created_at))
+        .where(MetricEvent.member_id.in_(member_ids)).group_by(MetricEvent.member_id))
+    last_active_map = {r[0]: r[1] for r in result.all()}
+
+    # 9. 批量 7日活跃
+    result = await db.execute(
+        select(MetricEvent.member_id, func.count(MetricEvent.id))
+        .where(MetricEvent.member_id.in_(member_ids), MetricEvent.created_at >= week_ago)
+        .group_by(MetricEvent.member_id))
+    active_7d_map = {r[0]: r[1] for r in result.all()}
+
+    # 10. 批量 prompt 消息计数 (DB 内 SQL 统计)
+    prompt_counts = await _prompt_count_by_member(db, member_ids, since)
+
+    # 组装结果
+    details = {}
+    for m in members:
+        mid = m.id
+        committed = commits_by_member.get(mid, [])
+        commit_totals = _aggregate_commits(committed)
+        agents, models = _tool_model_usage_from_commits(committed)
+        contribution = calc_score(
+            commit_totals["ai_added"], commit_totals["total_added"],
+            len(committed), team_commit_count,
+            edit_counts.get(mid, 0), max(1, active_days_map.get(mid, 0)),
+        )
+
+        last_active = last_active_map.get(mid)
+        details[mid] = {
+            "id": m.id, "name": m.name, "email": m.email, "distinct_id": m.distinct_id,
+            "commit_count": len(committed), "edit_count": edit_counts.get(mid, 0),
+            "checkpoint_count": checkpoint_counts.get(mid, 0),
+            "agent_usage_count": agent_usage_counts.get(mid, 0),
+            "repo_count": repo_counts.get(mid, 0),
+            "active_days": active_days_map.get(mid, 0),
+            "active_7d": active_7d_map.get(mid, 0) > 0,
+            "ai_lines": commit_totals["ai_added"], "human_lines": commit_totals["human_added"],
+            "ai_deleted": commit_totals["ai_deleted"], "ai_pct": commit_totals["ai_code_pct"],
+            "mixed_added_lines": commit_totals["mixed_added"],
+            "ai_accepted_lines": commit_totals["ai_accepted"],
+            "total_added_lines": commit_totals["total_added"],
+            "total_deleted_lines": commit_totals["total_deleted"],
+            "total_edit_lines": commit_totals["total_edit"],
+            "ai_edit_lines": commit_totals["ai_edit"],
+            "ai_activity_lines": commit_totals["ai_activity"],
+            "ai_code_pct": commit_totals["ai_code_pct"],
+            "prompt_message_count": prompt_counts.get(mid, 0),
+            "last_active": last_active.isoformat() if last_active else None,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+            "agents": agents, "models": models, "contribution": contribution,
+        }
+
+    return details
 
 
 # ============================================================
@@ -278,19 +448,23 @@ async def overview(
     total_cas = await db.scalar(select(func.count(CasObject.id)).where(*cas_conds)) or 0
     total_bundles = await db.scalar(select(func.count(Bundle.id)).where(*bundle_conds)) or 0
 
+    empty_result = {
+        "member_count": 0, "total_commits": 0, "total_events": 0,
+        "ai_acceptance_rate": 0, "total_ai_lines": 0,
+        "total_human_lines": 0, "total_ai_deleted": 0, "active_users_7d": 0,
+        "active_users_30d": 0, "team_ai_score": 0, "trend": "stable",
+        "total_edit_count": 0, "total_cas": total_cas, "total_bundles": total_bundles,
+        "avg_ai_lines_per_commit": 0,
+        "total_added_lines": 0, "total_deleted_lines": 0,
+        "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
+        "agent_edit_count": 0, "prompt_message_count": 0,
+    }
     if not member_ids:
-        return {"member_count": 0, "total_commits": 0, "total_events": 0,
-                "ai_acceptance_rate": 0, "total_ai_lines": 0,
-                "total_human_lines": 0, "total_ai_deleted": 0, "active_users_7d": 0,
-                "active_users_30d": 0, "team_ai_score": 0, "trend": "stable",
-                "total_edit_count": 0, "total_cas": total_cas, "total_bundles": total_bundles,
-                "avg_ai_lines_per_commit": 0,
-                "total_added_lines": 0, "total_deleted_lines": 0,
-                "total_edit_lines": 0, "ai_edit_lines": 0, "ai_code_pct": 0,
-                "agent_edit_count": 0, "prompt_message_count": 0}
+        return empty_result
 
     total_events = await db.scalar(select(func.count(MetricEvent.id)).where(*event_conds)) or 0
-    # Committed events
+
+    # Committed events - 聚合所有提交数据
     result = await db.execute(select(MetricEvent.event_data).where(*commit_conds))
     committed = [(evt_data,) for (evt_data,) in result.all()]
     commit_totals = _aggregate_commits(committed)
@@ -305,8 +479,11 @@ async def overview(
             *edit_conds,
             MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS)),
         )) or 0
+
+    # prompt 消息计数 - 使用 SQL json_each 在 DB 内统计
     prompt_message_count = await _prompt_count_for_members(db, member_ids, since)
 
+    # 活跃用户统计
     now_ts = datetime.now(timezone.utc)
     week_ago = now_ts - timedelta(days=7)
     month_ago = now_ts - timedelta(days=30)
@@ -326,6 +503,7 @@ async def overview(
     acc_rate = round(ai_lines / total_all * 100, 1) if total_all > 0 else 0
     team_score = acc_rate * 0.60 + min(active_7d / max(1, len(member_ids)) * 100, 100) * 0.40
 
+    # 趋势判断
     p1_start = week_ago - timedelta(days=7)
     p1 = (await db.execute(
         select(func.count(MetricEvent.id)).where(
@@ -382,11 +560,10 @@ async def users(
         select(Member).where(Member.team_id == team.id).order_by(Member.created_at.desc()).limit(100))
     members = result.scalars().all()
 
-    users_list = []
-    for m in members:
-        detail = await _build_user_detail(db, m, since)
-        users_list.append(detail)
+    # 批量加载所有成员详情
+    details = await _batch_member_details(db, list(members), since)
 
+    users_list = [details[m.id] for m in members if m.id in details]
     return {"users": users_list, "total": len(users_list)}
 
 
@@ -416,7 +593,6 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
     now_ts = datetime.now(timezone.utc)
     week_ago = now_ts - timedelta(days=7)
 
-    # 提交事件 (可选时间过滤)
     conds = [MetricEvent.member_id == m.id, MetricEvent.event_type == 1]
     if since: conds.append(MetricEvent.created_at >= since)
     result = await db.execute(select(MetricEvent.event_data).where(*conds))
@@ -426,6 +602,7 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
     ai_del = commit_totals["ai_deleted"]
     human = commit_totals["human_added"]
     commit_count = len(committed)
+
     team_commit_conds = [
         MetricEvent.member_id.in_(select(Member.id).where(Member.team_id == m.team_id)),
         MetricEvent.event_type == 1,
@@ -433,42 +610,35 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
     if since: team_commit_conds.append(MetricEvent.created_at >= since)
     team_commit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*team_commit_conds)) or 0
 
-    # Checkpoint (AI 编辑次数)
     cc = [MetricEvent.member_id == m.id, MetricEvent.event_type == 4]
     if since: cc.append(MetricEvent.created_at >= since)
     checkpoint_count = await db.scalar(select(func.count(MetricEvent.id)).where(*cc)) or 0
     ai_cc = [*cc, MetricEvent.event_data["kind"].as_string().in_(list(AI_KINDS))]
     edit_count = await db.scalar(select(func.count(MetricEvent.id)).where(*ai_cc)) or 0
 
-    # AgentUsage
     ac = [MetricEvent.member_id == m.id, MetricEvent.event_type == 2]
     if since: ac.append(MetricEvent.created_at >= since)
     agent_usage_count = await db.scalar(select(func.count(MetricEvent.id)).where(*ac)) or 0
 
-    # 活跃天数
     adc = [MetricEvent.member_id == m.id]
     if since: adc.append(MetricEvent.created_at >= since)
     active_days = (await db.execute(
         select(func.count(func.distinct(func.date(MetricEvent.created_at)))).where(*adc))).scalar() or 0
 
-    # 最近活跃
     last_evt = await db.execute(
         select(MetricEvent.created_at).where(MetricEvent.member_id == m.id)
         .order_by(MetricEvent.created_at.desc()).limit(1))
     last_active = last_evt.scalar_one_or_none()
 
-    # 仓库数
     rc = [MetricEvent.member_id == m.id, MetricEvent.repo_url.isnot(None)]
     if since: rc.append(MetricEvent.created_at >= since)
     repo_count = await db.scalar(
         select(func.count(func.distinct(MetricEvent.repo_url))).where(*rc)) or 0
 
-    # 7日活跃
-    active_7d = await db.scalar(
+    active_7d_result = await db.scalar(
         select(func.count(MetricEvent.id)).where(
             MetricEvent.member_id == m.id, MetricEvent.created_at >= week_ago)) or 0
 
-    # Agent/模型偏好按已提交到 git 的 commit 明细统计，避免把过程事件里的 unknown 算进去。
     agents, models = _tool_model_usage_from_commits(committed)
 
     total_lines = commit_totals["total_added"]
@@ -482,7 +652,7 @@ async def _build_user_detail(db: AsyncSession, m: Member, since: datetime | None
         "commit_count": commit_count, "edit_count": edit_count,
         "checkpoint_count": checkpoint_count,
         "agent_usage_count": agent_usage_count, "repo_count": repo_count,
-        "active_days": active_days, "active_7d": active_7d > 0,
+        "active_days": active_days, "active_7d": active_7d_result > 0,
         "ai_lines": ai_lines, "human_lines": human, "ai_deleted": ai_del, "ai_pct": ai_pct,
         "mixed_added_lines": commit_totals["mixed_added"],
         "ai_accepted_lines": commit_totals["ai_accepted"],
@@ -574,35 +744,8 @@ async def _build_user_agent_models(db: AsyncSession, member_id: str, since: date
     return sorted(pivot, key=lambda x: (x["ai_code_lines"], x["ai_code_pct"], x["commits"]), reverse=True)[:30]
 
 
-async def _build_user_files(db: AsyncSession, member_id: str) -> list[dict]:
-    query = text("""
-        SELECT json_extract(event_data, '$.file_path') as fp, COUNT(*) as edits,
-               SUM(CAST(json_extract(event_data, '$.lines_added') AS INTEGER)) as added
-        FROM metric_events WHERE member_id = :mid AND event_type = 4
-          AND json_extract(event_data, '$.file_path') IS NOT NULL
-        GROUP BY fp ORDER BY edits DESC LIMIT 10
-    """)
-    result = await db.execute(query, {"mid": member_id})
-    files = [{"file": r[0] or "unknown", "edits": r[1], "lines_added": r[2] or 0} for r in result.all()]
-    if files:
-        return files
-
-    result = await db.execute(
-        select(MetricEvent.event_data).where(MetricEvent.member_id == member_id, MetricEvent.event_type == 1)
-    )
-    commits = result.all()
-    if not commits:
-        return []
-    totals = _aggregate_commits([(evt_data,) for (evt_data,) in commits])
-    return [{
-        "file": "[commit summary]",
-        "edits": len(commits),
-        "lines_added": totals["total_added"],
-    }]
-
-
 # ============================================================
-#  /ranking (支持时间筛选)
+#  /ranking (支持时间筛选) - 批量查询优化
 # ============================================================
 @router.get("/ranking")
 async def ranking(
@@ -618,9 +761,14 @@ async def ranking(
     result = await db.execute(select(Member).where(Member.team_id == team.id).limit(100))
     members = result.scalars().all()
 
+    # 批量加载所有成员详情
+    details = await _batch_member_details(db, list(members), since)
+
     ranking_list = []
     for m in members:
-        detail = await _build_user_detail(db, m, since)
+        detail = details.get(m.id)
+        if not detail:
+            continue
         ranking_list.append({
             "id": m.id, "name": m.name, "distinct_id": m.distinct_id,
             "contribution": detail["contribution"],
@@ -666,7 +814,6 @@ async def timeline(
     start_date = _start_for_days(days)
 
     if member_id and member_id in member_ids:
-        # 单用户视图
         query = text("""
             SELECT DATE(created_at) as day, COUNT(*) as events,
                    SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
@@ -679,7 +826,6 @@ async def timeline(
             {"date": r[0], "commits": r[2], "edits": r[3], "events": r[1]} for r in result.all()
         ]}
 
-    # 全员聚合
     query = text("""
         SELECT DATE(created_at) as day, COUNT(*) as events,
                SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
@@ -698,7 +844,7 @@ async def timeline(
 
 
 # ============================================================
-#  /agents
+#  /agents - 消除 N+1 查询
 # ============================================================
 @router.get("/agents")
 async def agents(db: AsyncSession = Depends(get_db), api_key: str = Header(None, alias="X-API-Key")):
@@ -715,19 +861,37 @@ async def agents(db: AsyncSession = Depends(get_db), api_key: str = Header(None,
         GROUP BY a ORDER BY c DESC LIMIT 20
     """)
     result = await db.execute(query, {"tid": team.id})
-    agents_list = []
-    for r in result.all():
-        model_query = text("""
-            SELECT json_extract(event_data, '$.model') as m, COUNT(*) as c
-            FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
-              AND json_extract(event_data, '$.tool') = :a
+    agents_rows = result.all()
+
+    # 批量查询所有 agent 的 model 分布
+    agent_names = [r[0] for r in agents_rows if r[0]]
+    models_by_agent: dict[str, list[dict]] = {}
+    if agent_names:
+        placeholders = ",".join(f":a{i}" for i in range(len(agent_names)))
+        params = {"tid": team.id}
+        for i, name in enumerate(agent_names):
+            params[f"a{i}"] = name
+        model_query = text(f"""
+            SELECT json_extract(event_data, '$.tool') as a,
+                   json_extract(event_data, '$.model') as m, COUNT(*) as c
+            FROM metric_events
+            WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+              AND json_extract(event_data, '$.tool') IN ({placeholders})
               AND json_extract(event_data, '$.model') IS NOT NULL
-            GROUP BY m ORDER BY c DESC LIMIT 5
+            GROUP BY a, m ORDER BY a, c DESC
         """)
-        mr = await db.execute(model_query, {"tid": team.id, "a": r[0]})
+        model_result = await db.execute(model_query, params)
+        for a, m, c in model_result.all():
+            agent_models = models_by_agent.setdefault(a, [])
+            if len(agent_models) < 5:
+                agent_models.append({"name": m or "unknown", "count": c})
+
+    agents_list = []
+    for r in agents_rows:
+        agent_name = r[0] or "unknown"
         agents_list.append({
-            "name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2],
-            "models": [{"name": x[0] or "unknown", "count": x[1]} for x in mr.all()],
+            "name": agent_name, "usage_count": r[1], "user_count": r[2],
+            "models": models_by_agent.get(r[0], []),
         })
     return {"agents": agents_list}
 
@@ -906,8 +1070,6 @@ async def efficiency_trend(
     start_date = _start_for_days(days)
 
     if member_id and member_id in member_ids:
-        # ---------- 单人趋势 ----------
-        # 1) 按天查 committed 事件原始数据
         result = await db.execute(
             select(func.date(MetricEvent.created_at), MetricEvent.event_data)
             .where(MetricEvent.member_id == member_id,
@@ -918,7 +1080,6 @@ async def efficiency_trend(
         for day, evt_data in result.all():
             daily_committed.setdefault(str(day), []).append(evt_data)
 
-        # 2) 按天查 edit 计数
         edit_query = text("""
             SELECT DATE(created_at) as day, COUNT(*) as edits
             FROM metric_events WHERE member_id = :mid AND event_type = 4
@@ -927,7 +1088,6 @@ async def efficiency_trend(
         edit_result = await db.execute(edit_query, {"mid": member_id, "sd": start_date.isoformat()})
         daily_edits = {str(r[0]): r[1] for r in edit_result.all()}
 
-        # 3) 汇总
         all_days = sorted(set(list(daily_committed.keys()) + list(daily_edits.keys())))
         trend_list = []
         for day in all_days:
@@ -944,8 +1104,7 @@ async def efficiency_trend(
             })
         return {"trend": trend_list}
 
-    # ---------- 团队趋势 ----------
-    # 1) 按天查所有 committed 事件原始数据
+    # 团队趋势
     result = await db.execute(
         select(func.date(MetricEvent.created_at), MetricEvent.event_data, MetricEvent.member_id)
         .where(MetricEvent.member_id.in_(member_ids),
@@ -959,7 +1118,6 @@ async def efficiency_trend(
         daily_committed.setdefault(d, []).append(evt_data)
         daily_users.setdefault(d, set()).add(mid)
 
-    # 2) 按天查 edit 计数
     edit_query = text("""
         SELECT DATE(created_at) as day, COUNT(*) as edits
         FROM metric_events
@@ -971,7 +1129,6 @@ async def efficiency_trend(
     edit_result = await db.execute(edit_query, {"tid": team.id, "sd": start_date.isoformat()})
     daily_edits = {str(r[0]): r[1] for r in edit_result.all()}
 
-    # 3) 汇总
     all_days = sorted(set(list(daily_committed.keys()) + list(daily_edits.keys())))
     trend_list = []
     for day in all_days:
@@ -1077,7 +1234,7 @@ async def language_trend(
 
 
 # ============================================================
-#  /repo-stats  增强版仓库统计 (含AI贡献度)
+#  /repo-stats  增强版仓库统计 (含AI贡献度) - 批量查询优化
 # ============================================================
 @router.get("/repo-stats")
 async def repo_stats(
@@ -1109,6 +1266,60 @@ async def repo_stats(
     base_result = await db.execute(base_query, {"tid": team.id, "sd": since.isoformat() if since else None})
     base_rows = base_result.all()
 
+    if not base_rows:
+        return {"repos": []}
+
+    repo_urls = [r[0] for r in base_rows]
+
+    # 批量加载所有仓库的 commit event_data
+    commit_conds = [
+        MetricEvent.member_id.in_(member_ids),
+        MetricEvent.event_type == 1,
+        MetricEvent.repo_url.in_(repo_urls),
+    ]
+    if since: commit_conds.append(MetricEvent.created_at >= since)
+    result = await db.execute(
+        select(MetricEvent.repo_url, MetricEvent.event_data).where(*commit_conds))
+    commits_by_repo: dict[str, list[tuple]] = {}
+    for repo_url, evt_data in result.all():
+        commits_by_repo.setdefault(repo_url, []).append((evt_data,))
+
+    # 批量加载所有仓库的 prompt 消息计数
+    prompt_counts = await _prompt_count_by_repo(db, repo_urls, since)
+
+    # 批量加载所有仓库的 top 3 贡献者
+    if repo_urls:
+        r_placeholders = ",".join(f":r{i}" for i in range(len(repo_urls)))
+        params = {"tid": team.id}
+        for i, url in enumerate(repo_urls):
+            params[f"r{i}"] = url
+        if since:
+            params["sd"] = since.isoformat()
+            top_query_sql = f"""
+                SELECT me.repo_url, m.name, COUNT(*) as cnt
+                FROM metric_events me JOIN members m ON me.member_id = m.id
+                WHERE me.repo_url IN ({r_placeholders}) AND me.event_type = 1
+                  AND me.member_id IN (SELECT id FROM members WHERE team_id = :tid)
+                  AND me.created_at >= :sd
+                GROUP BY me.repo_url, me.member_id ORDER BY me.repo_url, cnt DESC
+            """
+        else:
+            top_query_sql = f"""
+                SELECT me.repo_url, m.name, COUNT(*) as cnt
+                FROM metric_events me JOIN members m ON me.member_id = m.id
+                WHERE me.repo_url IN ({r_placeholders}) AND me.event_type = 1
+                  AND me.member_id IN (SELECT id FROM members WHERE team_id = :tid)
+                GROUP BY me.repo_url, me.member_id ORDER BY me.repo_url, cnt DESC
+            """
+        top_result = await db.execute(text(top_query_sql), params)
+        top_by_repo: dict[str, list[dict]] = {}
+        for repo_url, name, cnt in top_result.all():
+            contributors = top_by_repo.setdefault(repo_url, [])
+            if len(contributors) < 3:
+                contributors.append({"name": name or "unknown", "commits": cnt})
+    else:
+        top_by_repo = {}
+
     repos_list = []
     for r in base_rows:
         repo_url = r[0]
@@ -1119,41 +1330,15 @@ async def repo_stats(
         if hasattr(last_act, 'isoformat'):
             last_act = last_act.isoformat()
 
-        # 提取 repo 名称
         repo_name = repo_url.rstrip("/").rsplit("/", 1)[-1] if repo_url else "unknown"
         if repo_name.endswith(".git"):
             repo_name = repo_name[:-4]
 
-        # 查询该仓库的 committed 事件数据, Python 解析 AI/人类行数
-        commit_conds = [
-            MetricEvent.member_id.in_(member_ids),
-            MetricEvent.event_type == 1,
-            MetricEvent.repo_url == repo_url,
-        ]
-        if since: commit_conds.append(MetricEvent.created_at >= since)
-        committed_result = await db.execute(select(MetricEvent.event_data).where(*commit_conds))
-        committed = [(evt_data,) for (evt_data,) in committed_result.all()]
+        committed = commits_by_repo.get(repo_url, [])
         totals = _aggregate_commits(committed)
         ai_lines = totals["ai_added"]
         human_lines = totals["human_added"]
         ai_pct = totals["ai_code_pct"]
-
-        cas_conds = [CasObject.repo_url == repo_url]
-        if since: cas_conds.append(CasObject.created_at >= since)
-        cas_result = await db.execute(select(CasObject.content).where(*cas_conds))
-        prompt_message_count = sum(_prompt_user_message_count(row[0]) for row in cas_result.all())
-
-        # top 3 贡献者
-        top_query = text("""
-            SELECT m.name, COUNT(*) as cnt
-            FROM metric_events me JOIN members m ON me.member_id = m.id
-            WHERE me.repo_url = :repo AND me.event_type = 1
-              AND me.member_id IN (SELECT id FROM members WHERE team_id = :tid)
-              AND (:sd IS NULL OR me.created_at >= :sd)
-            GROUP BY me.member_id ORDER BY cnt DESC LIMIT 3
-        """)
-        top_result = await db.execute(top_query, {"repo": repo_url, "tid": team.id, "sd": since.isoformat() if since else None})
-        top_contributors = [{"name": t[0] or "unknown", "commits": t[1]} for t in top_result.all()]
 
         repos_list.append({
             "repo_url": repo_url,
@@ -1171,8 +1356,8 @@ async def repo_stats(
             "total_edit_lines": totals["total_edit"],
             "ai_edit_lines": totals["ai_edit"],
             "ai_activity_lines": totals["ai_activity"],
-            "prompt_message_count": prompt_message_count,
-            "top_contributors": top_contributors,
+            "prompt_message_count": prompt_counts.get(repo_url, 0),
+            "top_contributors": top_by_repo.get(repo_url, []),
             "last_activity": str(last_act) if last_act else None,
         })
 
@@ -1221,13 +1406,11 @@ async def time_distribution(
         """)
         result = await db.execute(query, {"tid": team.id, "sd": start_date.isoformat()})
 
-    # 构建 0-23 小时完整分布
     hour_map = {r[0]: {"hour": r[0], "events": r[1], "commits": r[2], "edits": r[3]} for r in result.all()}
     distribution = []
     for h in range(24):
         distribution.append(hour_map.get(h, {"hour": h, "events": 0, "commits": 0, "edits": 0}))
 
-    # 找出最活跃的3个小时
     sorted_hours = sorted(distribution, key=lambda x: x["events"], reverse=True)
     peak_hours = [h["hour"] for h in sorted_hours[:3] if h["events"] > 0]
 
