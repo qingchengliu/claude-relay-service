@@ -8,8 +8,33 @@ from sqlalchemy import select, func
 from sqlalchemy.sql import text
 from ..database import get_db
 from ..models import Team, Member, MetricEvent, CasObject, Bundle
+import asyncio
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
+
+# ============================================================
+#  轻量 TTL 缓存 - 并行请求时避免重复重型查询
+# ============================================================
+_stats_cache: dict[str, tuple[float, object]] = {}
+_cache_ttl: float = 5.0  # 5秒 TTL，足够覆盖一波 dashboard 并行刷新
+
+
+def _cache_get(key: str) -> object | None:
+    entry = _stats_cache.get(key)
+    if entry:
+        ts, val = entry
+        if datetime.now(timezone.utc).timestamp() - ts < _cache_ttl:
+            return val
+        del _stats_cache[key]
+    return None
+
+
+def _cache_set(key: str, val: object):
+    _stats_cache[key] = (datetime.now(timezone.utc).timestamp(), val)
+    # 防止缓存膨胀
+    if len(_stats_cache) > 50:
+        oldest = min(_stats_cache, key=lambda k: _stats_cache[k][0])
+        del _stats_cache[oldest]
 
 # ============================================================
 #  AI 贡献度评分: 代码量(50%) + 辅助频率(30%) + 活跃度(20%)
@@ -208,6 +233,10 @@ async def _prompt_count_for_members(db: AsyncSession, member_ids: list[str], sin
     """在 SQLite DB 内使用 json_each 统计 user/human 消息数，不加载完整 JSON 到 Python。"""
     if not member_ids:
         return 0
+    cache_key = f"pcm:{','.join(sorted(member_ids))}:{since.isoformat() if since else 'all'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     placeholders = ",".join(f":mid{i}" for i in range(len(member_ids)))
     params = {f"mid{i}": mid for i, mid in enumerate(member_ids)}
 
@@ -228,7 +257,9 @@ async def _prompt_count_for_members(db: AsyncSession, member_ids: list[str], sin
 
     cas_count = (await db.execute(text(cas_sql), params)).scalar() or 0
     bundle_count = (await db.execute(text(bundle_sql), params)).scalar() or 0
-    return cas_count + bundle_count
+    total = cas_count + bundle_count
+    _cache_set(cache_key, total)
+    return total
 
 
 async def _prompt_count_for_member(db: AsyncSession, member_id: str, since: datetime | None = None) -> int:
@@ -239,6 +270,10 @@ async def _prompt_count_by_member(db: AsyncSession, member_ids: list[str], since
     """按成员分组统计 prompt 消息数，一次查询返回 {member_id: count}。"""
     if not member_ids:
         return {}
+    cache_key = f"pcbm:{','.join(sorted(member_ids))}:{since.isoformat() if since else 'all'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     placeholders = ",".join(f":mid{i}" for i in range(len(member_ids)))
     params = {f"mid{i}": mid for i, mid in enumerate(member_ids)}
 
@@ -264,6 +299,7 @@ async def _prompt_count_by_member(db: AsyncSession, member_ids: list[str], since
         result[mid] = result.get(mid, 0) + (cnt or 0)
     for mid, cnt in (await db.execute(text(bundle_sql), params)).all():
         result[mid] = result.get(mid, 0) + (cnt or 0)
+    _cache_set(cache_key, result)
     return result
 
 
@@ -271,6 +307,10 @@ async def _prompt_count_by_repo(db: AsyncSession, repo_urls: list[str], since: d
     """按仓库分组统计 prompt 消息数。"""
     if not repo_urls:
         return {}
+    cache_key = f"pcbr:{','.join(sorted(repo_urls))}:{since.isoformat() if since else 'all'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
     placeholders = ",".join(f":r{i}" for i in range(len(repo_urls)))
     params = {f"r{i}": r for i, r in enumerate(repo_urls)}
 
@@ -284,7 +324,9 @@ async def _prompt_count_by_repo(db: AsyncSession, repo_urls: list[str], since: d
         sql += " AND cas_objects.created_at >= :since"
         params["since"] = since.isoformat()
 
-    return {r[0]: r[1] or 0 for r in (await db.execute(text(sql), params)).all()}
+    result = {r[0]: r[1] or 0 for r in (await db.execute(text(sql), params)).all()}
+    _cache_set(cache_key, result)
+    return result
 
 
 # ============================================================
@@ -295,6 +337,10 @@ async def _batch_member_details(db: AsyncSession, members: list[Member], since: 
     """一次批量查询加载所有成员的详情数据，替代逐成员调用 _build_user_detail。"""
     if not members:
         return {}
+    cache_key = f"bmd:{','.join(sorted(m.id for m in members))}:{since.isoformat() if since else 'all'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
 
     member_ids = [m.id for m in members]
     now_ts = datetime.now(timezone.utc)
@@ -407,7 +453,9 @@ async def _batch_member_details(db: AsyncSession, members: list[Member], since: 
             "agents": agents, "models": models, "contribution": contribution,
         }
 
-    return details
+    result = details
+    _cache_set(cache_key, result)
+    return result
 
 
 # ============================================================
