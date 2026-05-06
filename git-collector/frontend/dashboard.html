@@ -793,26 +793,16 @@ async function refreshAll(){
     const dash = await api('/api/stats/dashboard?days=' + days);
     state.overview = dash.overview;
     state.ranking = dash.ranking || [];
+    state.members = await api('/api/stats/members').then(r => r.members || []);
     state.models_data = dash.models || [];
 
-    // 轻量补充数据
-    const [membersRes, agentsRes, weeklyRes, trendRes, langRes] = await Promise.all([
-      api('/api/stats/members'),
-      api('/api/stats/agents'),
-      api('/api/stats/weekly'),
-      api('/api/stats/ai-code-trend?days=' + d),
+    // 仅剩 2 个轻量接口
+    const [langRes, distRes] = await Promise.all([
       api('/api/stats/language-trend?days=' + d),
+      api('/api/stats/time-distribution?days=' + d),
     ]);
-    state.members = membersRes.members || [];
-    const agentsData = agentsRes.agents || [];
-    const weeklyData = weeklyRes.weeks || [];
-    const trendData = trendRes.trend || [];
-    const langData = langRes.trend || [];
 
-    // 时间分布 (可选)
-    const distRes = await api('/api/stats/time-distribution?days=' + d);
-
-    renderBanner(dash.overview, trendData, dash.models);
+    renderBanner(dash.overview, dash.ai_trend || [], dash.models);
     renderFunnel(dash.overview, state.ranking);
     renderQuadrant(state.ranking);
     renderAdoptionWall(state.ranking);
@@ -820,14 +810,14 @@ async function refreshAll(){
     renderRanking(state.ranking);
     renderPeopleStats(state.ranking);
     renderLines(dash.overview);
-    renderEfficiency(trendRes);
+    renderEfficiency({trend: dash.ai_trend || []});
     renderActiveUsers({timeline: dash.timeline || []});
     renderTimeline({timeline: dash.timeline || []});
     renderHeatmap(distRes);
     renderRepos({repos: dash.repos || []});
-    renderWeekly({weeks: weeklyData});
-    renderLanguageTrend({trend: langData});
-    renderAgents({agents: agentsData});
+    renderWeekly({weeks: dash.weekly || []});
+    renderLanguageTrend(langRes);
+    renderAgents({agents: dash.agents || []});
     renderModels({models: dash.models || []});
     populateMemberSelectors();
     $('apiStatus').textContent = '已同步 · ' + state.members.length + ' 成员 · ' + (state.ranking.length) + ' 活跃';

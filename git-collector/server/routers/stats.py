@@ -1618,6 +1618,67 @@ async def dashboard_data(
     timeline_list = [{"date": r[0], "events": r[1], "commits": r[2], "agent_usages": r[3],
                       "edits": r[4], "unique_users": r[5]} for r in timeline_result.all()]
 
+    # === agents (batch query) ===
+    agents_query = text("""
+        SELECT json_extract(event_data, '$.tool') as a, COUNT(*) as c,
+               COUNT(DISTINCT member_id) as u
+        FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND json_extract(event_data, '$.tool') IS NOT NULL AND json_extract(event_data, '$.tool') != ''
+        GROUP BY a ORDER BY c DESC LIMIT 20
+    """)
+    agents_result = await db.execute(agents_query, {"tid": team.id})
+    agent_names = [r[0] for r in agents_result.all() if r[0]]
+    agents_by_name: dict[str, list] = {}
+    if agent_names:
+        a_placeholders = ",".join(f":a{i}" for i in range(len(agent_names)))
+        a_params = {"tid": team.id}
+        for i, name in enumerate(agent_names): a_params[f"a{i}"] = name
+        am_query = text(f"""
+            SELECT json_extract(event_data, '$.tool') as a,
+                   json_extract(event_data, '$.model') as m, COUNT(*) as c
+            FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+              AND json_extract(event_data, '$.tool') IN ({a_placeholders})
+              AND json_extract(event_data, '$.model') IS NOT NULL
+            GROUP BY a, m ORDER BY a, c DESC
+        """)
+        am_result = await db.execute(am_query, a_params)
+        for a, m, c in am_result.all():
+            lst = agents_by_name.setdefault(a, [])
+            if len(lst) < 5: lst.append({"name": m or "unknown", "count": c})
+    agents_list = [{"name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2],
+                    "models": agents_by_name.get(r[0], [])} for r in agents_result.all()]
+
+    # === weekly ===
+    weekly_query = text("""
+        SELECT strftime('%Y-W%W', created_at) as wk, COUNT(*) as ev,
+               COUNT(DISTINCT member_id) as us,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as cm,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as ed
+        FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND created_at >= :sd GROUP BY wk ORDER BY wk ASC
+    """)
+    ws = datetime.now(timezone.utc) - timedelta(weeks=12)
+    weekly_result = await db.execute(weekly_query, {"tid": team.id, "sd": ws.isoformat()})
+    weekly_list = [{"week": r[0], "events": r[1], "unique_users": r[2], "commits": r[3], "edits": r[4]} for r in weekly_result.all()]
+
+    # === ai-code-trend ===
+    trend_result = await db.execute(
+        select(func.date(MetricEvent.created_at), MetricEvent.event_data)
+        .where(MetricEvent.member_id.in_(member_ids_active), MetricEvent.event_type == 1, MetricEvent.created_at >= start_date)
+        .order_by(MetricEvent.created_at))
+    daily: dict[str, list[tuple]] = {}
+    for day, evt_data in trend_result.all():
+        daily.setdefault(str(day), []).append((evt_data,))
+    ai_trend_list = []
+    for day in sorted(daily.keys()):
+        totals = _aggregate_commits(daily[day])
+        ai_trend_list.append({
+            "date": day, "ai_added_lines": totals["ai_added"],
+            "non_ai_added_lines": totals["non_ai_added"],
+            "ai_code_pct": totals["ai_code_pct"],
+            "commit_count": len(daily[day]),
+        })
+
     return {
         "overview": overview_data,
         "ranking": ranking_list,
@@ -1625,4 +1686,7 @@ async def dashboard_data(
         "repos": repos_list,
         "models": models_list,
         "timeline": timeline_list,
+        "agents": agents_list,
+        "weekly": weekly_list,
+        "ai_trend": ai_trend_list,
     }
