@@ -789,17 +789,13 @@ async function refreshAll(){
     const days = $('globalDays').value;
     const d = days || 30;
 
-    // 先加载聚合数据（重型查询独占 SQLite）
+    // 一站式聚合查询（重型查询独占 SQLite）
     const dash = await api('/api/stats/dashboard?days=' + days);
     state.overview = dash.overview;
     state.ranking = dash.ranking || [];
 
-    // 聚合完成后再并行加载轻量接口
-    const [membersRes, langRes, distRes] = await Promise.all([
-      api('/api/stats/members'),
-      api('/api/stats/language-trend?days=' + d),
-      api('/api/stats/time-distribution?days=' + d),
-    ]);
+    // 仅剩成员列表（极轻量）
+    const membersRes = await api('/api/stats/members');
     state.members = membersRes.members || [];
 
     renderBanner(dash.overview, dash.ai_trend || [], dash.models);
@@ -813,10 +809,10 @@ async function refreshAll(){
     renderEfficiency({trend: dash.ai_trend || []});
     renderActiveUsers({timeline: dash.timeline || []});
     renderTimeline({timeline: dash.timeline || []});
-    renderHeatmap(distRes);
+    renderHeatmap(dash.time_distribution || {distribution:[],peak_hours:[]});
     renderRepos({repos: dash.repos || []});
     renderWeekly({weeks: dash.weekly || []});
-    renderLanguageTrend(langRes);
+    renderLanguageTrend({trend: dash.language_trend || []});
     renderAgents({agents: dash.agents || []});
     renderModels({models: dash.models || []});
     populateMemberSelectors();

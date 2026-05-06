@@ -1689,4 +1689,41 @@ async def dashboard_data(
         "agents": agents_list,
         "weekly": weekly_list,
         "ai_trend": ai_trend_list,
+        "language_trend": await _language_trend_data(db, member_ids_active, start_date),
+        "time_distribution": await _time_dist_data(db, team.id, member_ids_active, start_date),
     }
+
+
+async def _language_trend_data(db, member_ids, start_date):
+    result = await db.execute(
+        select(func.date(MetricEvent.created_at), MetricEvent.event_data)
+        .where(MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 4,
+               MetricEvent.created_at >= start_date)
+        .order_by(MetricEvent.created_at))
+    buckets: dict[tuple[str, str], dict] = {}
+    for day, evt_data in result.all():
+        if not isinstance(evt_data, dict): continue
+        ext = _file_ext(evt_data.get("file_path"))
+        added = _sum_num(evt_data.get("lines_added_sloc")) or _sum_num(evt_data.get("lines_added"))
+        key = (str(day), ext)
+        b = buckets.setdefault(key, {"date": str(day), "extension": ext, "total_added_lines": 0, "ai_added_lines": 0})
+        b["total_added_lines"] += added
+        if str(evt_data.get("kind") or "").lower() in AI_KINDS:
+            b["ai_added_lines"] += added
+    return sorted(buckets.values(), key=lambda x: (x["date"], x["extension"]))
+
+
+async def _time_dist_data(db, team_id, member_ids, start_date):
+    query = text("""
+        SELECT CAST(strftime('%H', datetime(created_at, '+8 hours')) AS INTEGER) as hour,
+               COUNT(*) as events,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+        FROM metric_events WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
+          AND created_at >= :sd GROUP BY hour ORDER BY hour ASC
+    """)
+    result = await db.execute(query, {"tid": team_id, "sd": start_date.isoformat()})
+    hour_map = {r[0]: {"hour": r[0], "events": r[1], "commits": r[2], "edits": r[3]} for r in result.all()}
+    distribution = [hour_map.get(h, {"hour": h, "events": 0, "commits": 0, "edits": 0}) for h in range(24)]
+    peak_hours = [h["hour"] for h in sorted(distribution, key=lambda x: x["events"], reverse=True)[:3] if h["events"] > 0]
+    return {"distribution": distribution, "peak_hours": peak_hours}
