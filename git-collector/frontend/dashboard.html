@@ -789,18 +789,18 @@ async function refreshAll(){
     const days = $('globalDays').value;
     const d = days || 30;
 
-    // 主数据: 一次聚合查询替代 12 路并行，消除 SQLite 锁争用
+    // 先加载聚合数据（重型查询独占 SQLite）
     const dash = await api('/api/stats/dashboard?days=' + days);
     state.overview = dash.overview;
     state.ranking = dash.ranking || [];
-    state.members = await api('/api/stats/members').then(r => r.members || []);
-    state.models_data = dash.models || [];
 
-    // 仅剩 2 个轻量接口
-    const [langRes, distRes] = await Promise.all([
+    // 聚合完成后再并行加载轻量接口
+    const [membersRes, langRes, distRes] = await Promise.all([
+      api('/api/stats/members'),
       api('/api/stats/language-trend?days=' + d),
       api('/api/stats/time-distribution?days=' + d),
     ]);
+    state.members = membersRes.members || [];
 
     renderBanner(dash.overview, dash.ai_trend || [], dash.models);
     renderFunnel(dash.overview, state.ranking);
