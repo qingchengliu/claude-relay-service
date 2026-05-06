@@ -1,0 +1,30 @@
+git-collector/server/routers/stats.py
+  5519f226f933db68 1621-1681,1689-1691
+git-collector/frontend/dashboard.html
+  5519f226f933db68 796,799-800,802,805,813,818-820
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "d0896e0c53b5074b3cdcb5bd0b58c4fc2a6f4e01",
+  "prompts": {
+    "5519f226f933db68": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "838010b7-cea6-48e1-b727-9e7a7c152cb7",
+        "model": "deepseek-v4-pro"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 73,
+      "total_deletions": 19,
+      "accepted_lines": 73,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/2d0fb3432e20200089f88b7b1bbe98e73e49578a790ab78eff905605c5808f28",
+      "custom_attributes": {
+        "user": "doveliu",
+        "team": "风控研发中心"
+      }
+    }
+  }
+}
