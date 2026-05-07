@@ -815,6 +815,7 @@ async function refreshAll(){
     renderLanguageTrend({trend: dash.language_trend || []});
     renderAgents({agents: dash.agents || []});
     renderModels({models: dash.models || []});
+    renderAgentModelPivot({rows: dash.agent_model_pivot || []});
     populateMemberSelectors();
     $('apiStatus').textContent = '已同步 · ' + state.members.length + ' 成员 · ' + (state.ranking.length) + ' 活跃';
     $('liveTime').textContent = new Date().toLocaleTimeString('zh-CN');

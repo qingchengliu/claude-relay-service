@@ -1580,17 +1580,91 @@ async def dashboard_data(
 
     # === repos ===
     repo_query = text("""
-        SELECT repo_url, COUNT(*) as commits,
-               COUNT(DISTINCT member_id) as contributors, MAX(created_at) as last_act,
-               SUM(CASE WHEN event_type = 4 THEN 1 ELSE 0 END) as edits
+        SELECT repo_url,
+               COUNT(*) as total_events,
+               SUM(CASE WHEN event_type = 1 THEN 1 ELSE 0 END) as commits,
+               COUNT(DISTINCT member_id) as contributors,
+               SUM(CASE WHEN event_type = 4 AND json_extract(event_data, '$.kind') IN ('ai_agent', 'ai_tab') THEN 1 ELSE 0 END) as edits,
+               MAX(created_at) as last_act
         FROM metric_events
         WHERE member_id IN (SELECT id FROM members WHERE team_id = :tid)
           AND repo_url IS NOT NULL AND repo_url != ''
-        GROUP BY repo_url ORDER BY commits DESC LIMIT 20
+          AND (:sd IS NULL OR created_at >= :sd)
+        GROUP BY repo_url ORDER BY commits DESC LIMIT 15
     """)
-    repo_result = await db.execute(repo_query, {"tid": team.id})
-    repos_list = [{"repo_url": r[0], "commit_count": r[1], "contributor_count": r[2],
-                   "last_activity": str(r[3]) if r[3] else None, "edit_count": r[4]} for r in repo_result.all()]
+    repo_result = await db.execute(repo_query, {"tid": team.id, "sd": since.isoformat() if since else None})
+    repo_rows = repo_result.all()
+    repo_urls = [r[0] for r in repo_rows]
+
+    commits_by_repo: dict[str, list[tuple]] = {}
+    if repo_urls:
+        repo_commit_conds = [
+            MetricEvent.member_id.in_(member_ids_active),
+            MetricEvent.event_type == 1,
+            MetricEvent.repo_url.in_(repo_urls),
+        ]
+        if since:
+            repo_commit_conds.append(MetricEvent.created_at >= since)
+        result = await db.execute(select(MetricEvent.repo_url, MetricEvent.event_data).where(*repo_commit_conds))
+        for repo_url, evt_data in result.all():
+            commits_by_repo.setdefault(repo_url, []).append((evt_data,))
+
+    prompt_counts = await _prompt_count_by_repo(db, repo_urls, since)
+
+    top_by_repo: dict[str, list[dict]] = {}
+    if repo_urls:
+        r_placeholders = ",".join(f":r{i}" for i in range(len(repo_urls)))
+        params = {"tid": team.id}
+        for i, url in enumerate(repo_urls):
+            params[f"r{i}"] = url
+        since_filter = "AND me.created_at >= :sd" if since else ""
+        if since:
+            params["sd"] = since.isoformat()
+        top_query = text(f"""
+            SELECT me.repo_url, m.name, COUNT(*) as cnt
+            FROM metric_events me JOIN members m ON me.member_id = m.id
+            WHERE me.repo_url IN ({r_placeholders}) AND me.event_type = 1
+              AND me.member_id IN (SELECT id FROM members WHERE team_id = :tid)
+              {since_filter}
+            GROUP BY me.repo_url, me.member_id ORDER BY me.repo_url, cnt DESC
+        """)
+        top_result = await db.execute(top_query, params)
+        for repo_url, name, cnt in top_result.all():
+            contributors = top_by_repo.setdefault(repo_url, [])
+            if len(contributors) < 3:
+                contributors.append({"name": name or "unknown", "commits": cnt})
+
+    repos_list = []
+    for r in repo_rows:
+        repo_url = r[0]
+        last_act = r[5]
+        if hasattr(last_act, 'isoformat'):
+            last_act = last_act.isoformat()
+        repo_name = repo_url.rstrip("/").rsplit("/", 1)[-1] if repo_url else "unknown"
+        if repo_name.endswith(".git"):
+            repo_name = repo_name[:-4]
+        totals = _aggregate_commits(commits_by_repo.get(repo_url, []))
+        repos_list.append({
+            "repo_url": repo_url,
+            "repo_name": repo_name,
+            "commit_count": r[2],
+            "contributor_count": r[3],
+            "edit_count": r[4],
+            "ai_lines": totals["ai_added"],
+            "human_lines": totals["human_added"],
+            "ai_pct": totals["ai_code_pct"],
+            "mixed_added_lines": totals["mixed_added"],
+            "ai_accepted_lines": totals["ai_accepted"],
+            "total_added_lines": totals["total_added"],
+            "total_deleted_lines": totals["total_deleted"],
+            "total_edit_lines": totals["total_edit"],
+            "ai_edit_lines": totals["ai_edit"],
+            "ai_activity_lines": totals["ai_activity"],
+            "prompt_message_count": prompt_counts.get(repo_url, 0),
+            "top_contributors": top_by_repo.get(repo_url, []),
+            "last_activity": str(last_act) if last_act else None,
+        })
+    repos_list.sort(key=lambda x: (x["ai_lines"], x["ai_pct"], x["commit_count"]), reverse=True)
 
     # === models (lightweight) ===
     models_query = text("""
@@ -1627,7 +1701,8 @@ async def dashboard_data(
         GROUP BY a ORDER BY c DESC LIMIT 20
     """)
     agents_result = await db.execute(agents_query, {"tid": team.id})
-    agent_names = [r[0] for r in agents_result.all() if r[0]]
+    agent_rows = agents_result.all()
+    agent_names = [r[0] for r in agent_rows if r[0]]
     agents_by_name: dict[str, list] = {}
     if agent_names:
         a_placeholders = ",".join(f":a{i}" for i in range(len(agent_names)))
@@ -1646,7 +1721,47 @@ async def dashboard_data(
             lst = agents_by_name.setdefault(a, [])
             if len(lst) < 5: lst.append({"name": m or "unknown", "count": c})
     agents_list = [{"name": r[0] or "unknown", "usage_count": r[1], "user_count": r[2],
-                    "models": agents_by_name.get(r[0], [])} for r in agents_result.all()]
+                    "models": agents_by_name.get(r[0], [])} for r in agent_rows]
+
+    # === agent × model pivot ===
+    agent_model_rows: dict[tuple[str, str], dict] = {}
+    result = await db.execute(select(MetricEvent.member_id, MetricEvent.event_data).where(*commit_conds))
+    for member_id, evt_data in result.all():
+        if not isinstance(evt_data, dict):
+            continue
+        total_added = _commit_metrics(evt_data)["total_added"]
+        pairs = evt_data.get("tool_model_pairs")
+        if not isinstance(pairs, list) or len(pairs) <= 1:
+            continue
+        for i, pair in enumerate(pairs[1:], start=1):
+            agent, model = _split_tool_model(pair)
+            key = (agent, model)
+            row = agent_model_rows.setdefault(key, {
+                "agent": agent, "model": model, "commits": 0, "users": set(),
+                "total_added_lines": 0, "ai_code_lines": 0, "ai_accepted_lines": 0,
+                "mixed_added_lines": 0, "ai_generated_lines": 0, "ai_deleted_lines": 0,
+            })
+            row["commits"] += 1
+            row["users"].add(member_id)
+            row["total_added_lines"] += total_added
+            row["ai_code_lines"] += _metric_at(evt_data.get("ai_additions"), i)
+            row["ai_accepted_lines"] += _metric_at(evt_data.get("ai_accepted"), i)
+            row["mixed_added_lines"] += _metric_at(evt_data.get("mixed_additions"), i)
+            row["ai_generated_lines"] += _metric_at(evt_data.get("total_ai_additions"), i)
+            row["ai_deleted_lines"] += _metric_at(evt_data.get("total_ai_deletions"), i)
+
+    agent_model_pivot_rows = []
+    for row in agent_model_rows.values():
+        users = row.pop("users")
+        total_added = row["total_added_lines"]
+        ai_code = row["ai_code_lines"]
+        generated = row["ai_generated_lines"]
+        row["user_count"] = len(users)
+        row["ai_code_pct"] = min(100, round(ai_code / total_added * 100, 1)) if total_added > 0 else 0
+        row["conversion_pct"] = round(ai_code / generated * 100, 1) if generated > 0 else 0
+        row["mixed_pct"] = round(row["mixed_added_lines"] / ai_code * 100, 1) if ai_code > 0 else 0
+        agent_model_pivot_rows.append(row)
+    agent_model_pivot_rows.sort(key=lambda x: (x["ai_code_lines"], x["ai_code_pct"], x["commits"]), reverse=True)
 
     # === weekly ===
     weekly_query = text("""
@@ -1687,6 +1802,7 @@ async def dashboard_data(
         "models": models_list,
         "timeline": timeline_list,
         "agents": agents_list,
+        "agent_model_pivot": agent_model_pivot_rows,
         "weekly": weekly_list,
         "ai_trend": ai_trend_list,
         "language_trend": await _language_trend_data(db, member_ids_active, start_date),
