@@ -294,6 +294,9 @@ async def _prompt_count_by_member(db: AsyncSession, member_ids: list[str], since
         bundle_sql += " AND bundles.created_at >= :since"
         params["since"] = since.isoformat()
 
+    cas_sql += " GROUP BY cas_objects.member_id"
+    bundle_sql += " GROUP BY bundles.member_id"
+
     result = {}
     for mid, cnt in (await db.execute(text(cas_sql), params)).all():
         result[mid] = result.get(mid, 0) + (cnt or 0)
@@ -323,6 +326,8 @@ async def _prompt_count_by_repo(db: AsyncSession, repo_urls: list[str], since: d
     if since:
         sql += " AND cas_objects.created_at >= :since"
         params["since"] = since.isoformat()
+
+    sql += " GROUP BY cas_objects.repo_url"
 
     result = {r[0]: r[1] or 0 for r in (await db.execute(text(sql), params)).all()}
     _cache_set(cache_key, result)

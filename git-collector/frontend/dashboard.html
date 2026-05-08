@@ -406,7 +406,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
         <div class="card">
           <div class="card-head">
             <div class="ttl">生产力四象限 <span>Productivity Quadrant</span>
-              <i class="tip" data-tip="X=AI 行/(AI 行+人工行)*100%；Y=提交数；气泡=AI 行数" style="margin-left:6px">?</i>
+              <i class="tip" data-tip="X=AI 行/(AI 行+人工行)*100%；Y=提交行数；气泡=AI 行数" style="margin-left:6px">?</i>
             </div>
           </div>
           <div class="chart-wrap prime"><canvas id="quadChart"></canvas></div>
@@ -896,11 +896,12 @@ function renderFunnel(overview, ranking){
 function renderQuadrant(ranking){
   const data = ranking.filter(r => (r.commits || 0) + (r.ai_lines || 0) > 0).map(r => ({
     x: Math.min(100, Number(r.ai_pct) || 0),
-    y: Number(r.commits) || 0,
+    y: Number(r.total_added_lines) || 0,
     r: 4 + Math.min(20, Math.sqrt((r.ai_lines || 0) / 30)),
     name: r.name,
     id: r.id,
-    aiLines: r.ai_lines || 0
+    aiLines: r.ai_lines || 0,
+    commits: r.commits || 0
   }));
   const yMax = Math.max(10, ...data.map(p => p.y));
   const midY = yMax / 2;
@@ -927,12 +928,12 @@ function renderQuadrant(ranking){
     plugins: {
       legend: { display: false },
       tooltip: { callbacks: { label: (ctx) => {
-        const p = ctx.raw; return p.name + ' · AI ' + p.x.toFixed(0) + '% · ' + p.y + ' 提交 · AI 行 ' + fmt(p.aiLines);
+        const p = ctx.raw; return p.name + ' · AI ' + p.x.toFixed(0) + '% · 提交行 ' + fmt(p.y) + ' · 提交 ' + (p.commits || 0) + ' · AI 行 ' + fmt(p.aiLines);
       }}}
     },
     scales: {
       x: { min: 0, max: 100, title: { display: true, text: 'AI 代码占比 %', color: t.muted, font: { size: 11 } }, grid: { color: t.grid }, ticks: { color: t.muted } },
-      y: { beginAtZero: true, title: { display: true, text: '提交数', color: t.muted, font: { size: 11 } }, grid: { color: t.grid }, ticks: { color: t.muted } }
+      y: { beginAtZero: true, title: { display: true, text: '提交行数', color: t.muted, font: { size: 11 } }, grid: { color: t.grid }, ticks: { color: t.muted } }
     },
     onClick: (e, els) => { if(els && els.length){ const p = colored[els[0].index]; if(p && p.id) showUser(p.id); } }
   });
