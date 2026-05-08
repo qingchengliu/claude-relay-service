@@ -1,0 +1,30 @@
+git-collector/frontend/dashboard.html
+  f82387a4644899a8 409,899,903-904,931,936
+git-collector/server/routers/stats.py
+  f82387a4644899a8 297-299,330
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "e3a57c4272e584c85768ac0d25117cb4b1da0859",
+  "prompts": {
+    "f82387a4644899a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e056d-7e37-76b2-b16b-493c41425647",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 5,
+      "accepted_lines": 11,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/9e9a3176c9c96b31f7665421d882b3dbb906ff86b6f88bab98c8d4398a1f3198",
+      "custom_attributes": {
+        "team": "风控研发中心",
+        "user": "doveliu"
+      }
+    }
+  }
+}
