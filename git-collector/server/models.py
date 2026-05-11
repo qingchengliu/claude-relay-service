@@ -19,7 +19,7 @@ class Team(Base):
     name = Column(String(255), nullable=False, default="Default Team")
     api_key = Column(String(128), unique=True, nullable=False, default=gen_uuid)
     created_at = Column(DateTime, nullable=False, default=now)
-    members = relationship("Member", back_populates="team", lazy="selectin")
+    members = relationship("Member", back_populates="team", lazy="select")
 
 
 class Member(Base):
@@ -30,9 +30,9 @@ class Member(Base):
     email = Column(String(255), nullable=True)
     distinct_id = Column(String(128), nullable=True, index=True)
     created_at = Column(DateTime, nullable=False, default=now)
-    team = relationship("Team", back_populates="members", lazy="selectin")
-    sessions = relationship("Session", back_populates="member", lazy="selectin")
-    metric_events = relationship("MetricEvent", back_populates="member", lazy="selectin")
+    team = relationship("Team", back_populates="members", lazy="select")
+    sessions = relationship("Session", back_populates="member", lazy="select")
+    metric_events = relationship("MetricEvent", back_populates="member", lazy="select")
 
 
 class Session(Base):
@@ -47,7 +47,7 @@ class Session(Base):
     total_lines = Column(Integer, default=0)
     session_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, default=now, index=True)
-    member = relationship("Member", back_populates="sessions", lazy="selectin")
+    member = relationship("Member", back_populates="sessions", lazy="select")
 
 
 class CasObject(Base):
@@ -74,7 +74,7 @@ class MetricEvent(Base):
     repo_url = Column(String(1024), nullable=True)
     commit_sha = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=now, index=True)
-    member = relationship("Member", back_populates="metric_events", lazy="selectin")
+    member = relationship("Member", back_populates="metric_events", lazy="select")
     __table_args__ = (
         Index("ix_metric_events_member_type_created", "member_id", "event_type", "created_at"),
         Index("ix_metric_events_repo_url", "repo_url"),
