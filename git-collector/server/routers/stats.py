@@ -1,7 +1,6 @@
 from datetime import datetime, timezone, timedelta
 from collections import Counter
 from zoneinfo import ZoneInfo
-from pathlib import PurePosixPath, PureWindowsPath
 from fastapi import APIRouter, Depends, Header, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
@@ -207,9 +206,9 @@ def _parse_committed(committed: list[tuple]) -> tuple[int, int, int]:
 def _file_ext(path: str | None) -> str:
     if not path:
         return "[none]"
-    normalized = str(path).replace("\\", "/")
-    suffix = PurePosixPath(normalized).suffix or PureWindowsPath(path).suffix
-    return suffix.lower() if suffix else "[none]"
+    name = str(path).replace("\\", "/").rsplit("/", 1)[-1]
+    dot = name.rfind(".")
+    return name[dot:].lower() if dot > 0 and dot < len(name) - 1 else "[none]"
 
 
 def calc_score(ai_lines: int, total_lines: int, commits: int, total_commits: int,
