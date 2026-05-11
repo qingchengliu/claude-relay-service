@@ -1,0 +1,28 @@
+git-collector/server/models.py
+  f82387a4644899a8 22,33-35,50,77
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "720e5232a09eabd0fdbba8422049e76a3a590108",
+  "prompts": {
+    "f82387a4644899a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e056d-7e37-76b2-b16b-493c41425647",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 6,
+      "total_deletions": 6,
+      "accepted_lines": 6,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/42961ebc3d8e62bf8953bfe7566a732975cbf577c551e4cff1184f6d478fee1e",
+      "custom_attributes": {
+        "user": "doveliu",
+        "team": "风控研发中心"
+      }
+    }
+  }
+}
