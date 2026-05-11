@@ -1218,27 +1218,7 @@ async def language_trend(
     member_ids = await get_member_ids(db, team.id)
     if not member_ids: return {"trend": []}
 
-    start_date = _start_for_days(days)
-    result = await db.execute(
-        select(func.date(MetricEvent.created_at), MetricEvent.event_data)
-        .where(MetricEvent.member_id.in_(member_ids),
-               MetricEvent.event_type == 4,
-               MetricEvent.created_at >= start_date)
-        .order_by(MetricEvent.created_at))
-
-    buckets: dict[tuple[str, str], dict] = {}
-    for day, evt_data in result.all():
-        if not isinstance(evt_data, dict):
-            continue
-        ext = _file_ext(evt_data.get("file_path"))
-        added = _sum_num(evt_data.get("lines_added_sloc")) or _sum_num(evt_data.get("lines_added"))
-        key = (str(day), ext)
-        bucket = buckets.setdefault(key, {"date": str(day), "extension": ext, "total_added_lines": 0, "ai_added_lines": 0})
-        bucket["total_added_lines"] += added
-        if str(evt_data.get("kind") or "").lower() in AI_KINDS:
-            bucket["ai_added_lines"] += added
-
-    return {"trend": sorted(buckets.values(), key=lambda x: (x["date"], x["extension"]))}
+    return {"trend": await _language_trend_data(db, member_ids, _start_for_days(days))}
 
 
 # ============================================================
@@ -1772,19 +1752,24 @@ async def dashboard_data(
 
 async def _language_trend_data(db, member_ids, start_date):
     result = await db.execute(
-        select(func.date(MetricEvent.created_at), MetricEvent.event_data)
+        select(
+            func.date(MetricEvent.created_at),
+            func.json_extract(MetricEvent.event_data, "$.file_path"),
+            func.json_extract(MetricEvent.event_data, "$.lines_added_sloc"),
+            func.json_extract(MetricEvent.event_data, "$.lines_added"),
+            func.json_extract(MetricEvent.event_data, "$.kind"),
+        )
         .where(MetricEvent.member_id.in_(member_ids), MetricEvent.event_type == 4,
                MetricEvent.created_at >= start_date)
         .order_by(MetricEvent.created_at))
     buckets: dict[tuple[str, str], dict] = {}
-    for day, evt_data in result.all():
-        if not isinstance(evt_data, dict): continue
-        ext = _file_ext(evt_data.get("file_path"))
-        added = _sum_num(evt_data.get("lines_added_sloc")) or _sum_num(evt_data.get("lines_added"))
+    for day, file_path, lines_added_sloc, lines_added, kind in result.all():
+        ext = _file_ext(file_path)
+        added = _sum_num(lines_added_sloc) or _sum_num(lines_added)
         key = (str(day), ext)
         b = buckets.setdefault(key, {"date": str(day), "extension": ext, "total_added_lines": 0, "ai_added_lines": 0})
         b["total_added_lines"] += added
-        if str(evt_data.get("kind") or "").lower() in AI_KINDS:
+        if str(kind or "").lower() in AI_KINDS:
             b["ai_added_lines"] += added
     return sorted(buckets.values(), key=lambda x: (x["date"], x["extension"]))
 
