@@ -5,8 +5,9 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from ..database import get_db
-from ..models import CasObject, Member, Team, gen_uuid
+from ..models import CasObject, Member, Team, gen_uuid, now
 from ..config import allowed_repo_url
+from ..prompt_metrics import ensure_prompt_metric
 
 router = APIRouter(prefix="/worker/cas", tags=["cas"])
 
@@ -100,18 +101,27 @@ async def cas_upload(
                 continue
             if member_id is None:
                 member_id = await resolve_member(db, api_key, distinct_id)
-            db.add(CasObject(
+            cas = CasObject(
                 id=gen_uuid(), hash=obj.hash, content=obj.content,
                 kind=meta.get("kind", "unknown"), repo_url=repo_url,
                 api_version=meta.get("api_version", "v1"), member_id=member_id,
-            ))
+                created_at=now(),
+            )
+            db.add(cas)
+            await ensure_prompt_metric(db, "cas", cas.id, member_id, repo_url, obj.content, cas.created_at)
             await db.commit()
             results.append(CasResultItem(hash=obj.hash, status="ok"))
             success += 1
         except Exception:
             await db.rollback()
             existing = await db.execute(select(CasObject).where(CasObject.hash == obj.hash))
-            if existing.scalar_one_or_none():
+            existing_obj = existing.scalar_one_or_none()
+            if existing_obj:
+                await ensure_prompt_metric(
+                    db, "cas", existing_obj.id, existing_obj.member_id,
+                    existing_obj.repo_url, existing_obj.content, existing_obj.created_at,
+                )
+                await db.commit()
                 results.append(CasResultItem(hash=obj.hash, status="ok"))
                 success += 1
             else:

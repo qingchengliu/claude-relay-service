@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from sqlalchemy.sql import text
 from ..database import get_db
-from ..models import Team, Member, MetricEvent, CasObject, Bundle
+from ..models import Team, Member, MetricEvent, CasObject, Bundle, PromptMetric
 import asyncio
 
 router = APIRouter(prefix="/api/stats", tags=["stats"])
@@ -225,39 +225,22 @@ def calc_score(ai_lines: int, total_lines: int, commits: int, total_commits: int
 
 
 # ============================================================
-#  高性能 prompt 消息计数 - 使用 SQLite json_each 在 DB 内统计
-#  避免将数 MB 的 JSON 加载到 Python 内存中递归解析
+#  高性能 prompt 消息计数 - 读取上报时预解析的派生表
+#  原始 CAS/Bundle 仍保留，后续新增指标可重新回溯解析
 # ============================================================
 
 async def _prompt_count_for_members(db: AsyncSession, member_ids: list[str], since: datetime | None = None) -> int:
-    """在 SQLite DB 内使用 json_each 统计 user/human 消息数，不加载完整 JSON 到 Python。"""
+    """读取上报时预解析的 prompt 指标，避免看板查询反复扫描原始 JSON。"""
     if not member_ids:
         return 0
     cache_key = f"pcm:{','.join(sorted(member_ids))}:{since.isoformat() if since else 'all'}"
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    placeholders = ",".join(f":mid{i}" for i in range(len(member_ids)))
-    params = {f"mid{i}": mid for i, mid in enumerate(member_ids)}
-
-    cas_sql = f"""
-        SELECT COUNT(*) FROM cas_objects, json_each(cas_objects.content, '$.messages')
-        WHERE cas_objects.member_id IN ({placeholders})
-          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
-    """
-    bundle_sql = f"""
-        SELECT COUNT(*) FROM bundles, json_each(bundles.data, '$.messages')
-        WHERE bundles.member_id IN ({placeholders})
-          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
-    """
+    conds = [PromptMetric.member_id.in_(member_ids)]
     if since:
-        cas_sql += " AND cas_objects.created_at >= :since"
-        bundle_sql += " AND bundles.created_at >= :since"
-        params["since"] = since.isoformat()
-
-    cas_count = (await db.execute(text(cas_sql), params)).scalar() or 0
-    bundle_count = (await db.execute(text(bundle_sql), params)).scalar() or 0
-    total = cas_count + bundle_count
+        conds.append(PromptMetric.created_at >= since)
+    total = await db.scalar(select(func.sum(PromptMetric.prompt_message_count)).where(*conds)) or 0
     _cache_set(cache_key, total)
     return total
 
@@ -274,34 +257,14 @@ async def _prompt_count_by_member(db: AsyncSession, member_ids: list[str], since
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    placeholders = ",".join(f":mid{i}" for i in range(len(member_ids)))
-    params = {f"mid{i}": mid for i, mid in enumerate(member_ids)}
-
-    cas_sql = f"""
-        SELECT cas_objects.member_id, COUNT(*) as cnt
-        FROM cas_objects, json_each(cas_objects.content, '$.messages')
-        WHERE cas_objects.member_id IN ({placeholders})
-          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
-    """
-    bundle_sql = f"""
-        SELECT bundles.member_id, COUNT(*) as cnt
-        FROM bundles, json_each(bundles.data, '$.messages')
-        WHERE bundles.member_id IN ({placeholders})
-          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
-    """
+    conds = [PromptMetric.member_id.in_(member_ids)]
     if since:
-        cas_sql += " AND cas_objects.created_at >= :since"
-        bundle_sql += " AND bundles.created_at >= :since"
-        params["since"] = since.isoformat()
-
-    cas_sql += " GROUP BY cas_objects.member_id"
-    bundle_sql += " GROUP BY bundles.member_id"
-
-    result = {}
-    for mid, cnt in (await db.execute(text(cas_sql), params)).all():
-        result[mid] = result.get(mid, 0) + (cnt or 0)
-    for mid, cnt in (await db.execute(text(bundle_sql), params)).all():
-        result[mid] = result.get(mid, 0) + (cnt or 0)
+        conds.append(PromptMetric.created_at >= since)
+    rows = await db.execute(
+        select(PromptMetric.member_id, func.sum(PromptMetric.prompt_message_count))
+        .where(*conds).group_by(PromptMetric.member_id)
+    )
+    result = {mid: cnt or 0 for mid, cnt in rows.all()}
     _cache_set(cache_key, result)
     return result
 
@@ -314,22 +277,14 @@ async def _prompt_count_by_repo(db: AsyncSession, repo_urls: list[str], since: d
     cached = _cache_get(cache_key)
     if cached is not None:
         return cached
-    placeholders = ",".join(f":r{i}" for i in range(len(repo_urls)))
-    params = {f"r{i}": r for i, r in enumerate(repo_urls)}
-
-    sql = f"""
-        SELECT cas_objects.repo_url, COUNT(*) as cnt
-        FROM cas_objects, json_each(cas_objects.content, '$.messages')
-        WHERE cas_objects.repo_url IN ({placeholders})
-          AND LOWER(json_extract(json_each.value, '$.type')) IN ('user', 'human')
-    """
+    conds = [PromptMetric.repo_url.in_(repo_urls)]
     if since:
-        sql += " AND cas_objects.created_at >= :since"
-        params["since"] = since.isoformat()
-
-    sql += " GROUP BY cas_objects.repo_url"
-
-    result = {r[0]: r[1] or 0 for r in (await db.execute(text(sql), params)).all()}
+        conds.append(PromptMetric.created_at >= since)
+    rows = await db.execute(
+        select(PromptMetric.repo_url, func.sum(PromptMetric.prompt_message_count))
+        .where(*conds).group_by(PromptMetric.repo_url)
+    )
+    result = {repo_url: cnt or 0 for repo_url, cnt in rows.all()}
     _cache_set(cache_key, result)
     return result
 

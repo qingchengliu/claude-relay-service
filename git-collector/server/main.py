@@ -13,6 +13,7 @@ from server.database import init_db, engine, async_session
 from server.models import Team, gen_uuid
 from server.config import DEFAULT_API_KEY
 from server.auth_deps import require_auth
+from server.prompt_metrics_backfill import backfill_prompt_metrics
 from server.routers.auth import router as auth_router
 from server.routers.cas import router as cas_router
 from server.routers.metrics import router as metrics_router
@@ -31,6 +32,7 @@ async def lifespan(app: FastAPI):
         if not result.scalar_one_or_none():
             db.add(Team(id=gen_uuid(), name="风控研发中心", api_key=DEFAULT_API_KEY))
             await db.commit()
+        await backfill_prompt_metrics(db)
     yield
     await engine.dispose()
 

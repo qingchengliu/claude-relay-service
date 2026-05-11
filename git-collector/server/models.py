@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON, Index
+from sqlalchemy import Column, String, Integer, DateTime, ForeignKey, JSON, Index, UniqueConstraint
 from sqlalchemy.orm import relationship
 from .database import Base
 
@@ -91,4 +91,23 @@ class Bundle(Base):
     created_at = Column(DateTime, nullable=False, default=now)
     __table_args__ = (
         Index("ix_bundles_member_created", "member_id", "created_at"),
+    )
+
+
+class PromptMetric(Base):
+    __tablename__ = "prompt_metrics"
+    id = Column(String(36), primary_key=True, default=gen_uuid)
+    source_type = Column(String(16), nullable=False)
+    source_id = Column(String(36), nullable=False)
+    member_id = Column(String(36), ForeignKey("members.id"), nullable=True, index=True)
+    repo_url = Column(String(1024), nullable=True)
+    prompt_message_count = Column(Integer, nullable=False, default=0)
+    total_message_count = Column(Integer, nullable=False, default=0)
+    parser_version = Column(Integer, nullable=False, default=1, index=True)
+    metric_data = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False, default=now, index=True)
+    __table_args__ = (
+        UniqueConstraint("source_type", "source_id", name="uq_prompt_metrics_source"),
+        Index("ix_prompt_metrics_member_created", "member_id", "created_at"),
+        Index("ix_prompt_metrics_repo_created", "repo_url", "created_at"),
     )

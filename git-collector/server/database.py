@@ -1,7 +1,7 @@
 import os
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase
-from sqlalchemy import event
+from sqlalchemy import event, text
 from .config import DATABASE_URL
 
 if DATABASE_URL.startswith("sqlite"):
@@ -53,3 +53,14 @@ async def get_db() -> AsyncSession:
 async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if DATABASE_URL.startswith("sqlite"):
+            rows = await conn.execute(text("PRAGMA table_info(prompt_metrics)"))
+            columns = {row[1] for row in rows.fetchall()}
+            if "parser_version" not in columns:
+                await conn.execute(text(
+                    "ALTER TABLE prompt_metrics ADD COLUMN parser_version INTEGER NOT NULL DEFAULT 0"
+                ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_prompt_metrics_parser_version "
+                "ON prompt_metrics (parser_version)"
+            ))
