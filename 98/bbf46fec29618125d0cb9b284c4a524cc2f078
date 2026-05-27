@@ -1,0 +1,50 @@
+git-collector/server/routers/stats.py
+  f6be5120a5c0ecae 312-314,321
+  f82387a4644899a8 315,318,320,322-324,327-355,357-358
+git-collector/frontend/dashboard.html
+  f82387a4644899a8 227-229,1179-1181,1197,1217-1218
+  f6be5120a5c0ecae 225-226,230-234,1174,1176-1178,1182-1196,1201,1205,1207,1210-1216
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "98bbf46fec29618125d0cb9b284c4a524cc2f078",
+  "prompts": {
+    "f6be5120a5c0ecae": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e6847-7477-76d0-bbc7-9e31edf0a7d4",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 44,
+      "total_deletions": 12,
+      "accepted_lines": 41,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/30708168e903e6c62dd98d0cdca601a0d9f310623e4c7224f8bfcd2686b1e1df",
+      "custom_attributes": {
+        "user": "doveliu",
+        "team": "风控研发中心"
+      }
+    },
+    "f82387a4644899a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e056d-7e37-76b2-b16b-493c41425647",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 49,
+      "total_deletions": 12,
+      "accepted_lines": 46,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/b4f4f415cf17020a436e6d49eba8f79f71412561217f4a3d93a60be4be72ea28",
+      "custom_attributes": {
+        "user": "doveliu",
+        "team": "风控研发中心"
+      }
+    }
+  }
+}
