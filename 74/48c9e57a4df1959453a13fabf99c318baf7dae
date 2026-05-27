@@ -1,0 +1,42 @@
+git-collector/server/main.py
+  f82387a4644899a8 16,37
+git-collector/server/branch_requirement_backfill.py
+  f82387a4644899a8 1-30
+git-collector/server/models.py
+  f82387a4644899a8 75-76,83
+git-collector/server/routers/metrics.py
+  f82387a4644899a8 7,129-130,141
+git-collector/server/routers/stats.py
+  f82387a4644899a8 291-333,1319,1391-1392,1598,1650-1651
+git-collector/server/database.py
+  f82387a4644899a8 57-78
+git-collector/frontend/dashboard.html
+  f82387a4644899a8 570,1166,1175,1178
+git-collector/server/branch_utils.py
+  f82387a4644899a8 1-28
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "7448c9e57a4df1959453a13fabf99c318baf7dae",
+  "prompts": {
+    "f82387a4644899a8": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e056d-7e37-76b2-b16b-493c41425647",
+        "model": "gpt-5.5"
+      },
+      "human_author": "Claude Code",
+      "messages": [],
+      "total_additions": 142,
+      "total_deletions": 2,
+      "accepted_lines": 142,
+      "overriden_lines": 0,
+      "messages_url": "http://10.9.107.193:8000/cas/9463a9ded21dab10c632bf779c68ea2aaeef96b46806d9ab2b6e2dee059e35bb",
+      "custom_attributes": {
+        "team": "风控研发中心",
+        "user": "doveliu"
+      }
+    }
+  }
+}
