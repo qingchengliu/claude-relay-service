@@ -222,6 +222,16 @@ tbody td{padding:13px 16px;border-bottom:1px solid var(--line);font-size:13px;wh
 tbody tr:last-child td{border-bottom:0}
 tbody tr.row{transition:.12s;cursor:pointer}
 tbody tr.row:hover td{background:var(--surface-2)}
+tbody tr.repo-detail td{background:var(--surface-2);padding:0 16px 16px}
+.repo-toggle{display:inline-grid;place-items:center;width:20px;height:20px;margin-right:8px;border-radius:6px;background:var(--surface-hi);border:1px solid var(--line);color:var(--muted);font-size:11px;font-weight:800;vertical-align:middle}
+.repo-expand-btn{display:inline-flex;align-items:center;gap:4px;margin-right:10px;padding:4px 9px;border-radius:999px;border:1px solid rgba(91,141,239,.22);background:rgba(91,141,239,.10);color:var(--brand);font-size:11px;font-weight:700;line-height:1;white-space:nowrap}
+.repo-expand-btn:hover{background:rgba(91,141,239,.16)}
+.repo-expand-btn.disabled{border-color:var(--line-2);background:var(--surface-hi);color:var(--muted)}
+.req-table{width:100%;margin:6px 0 0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--surface)}
+.req-table table{min-width:820px}
+.req-table th{position:static;background:var(--surface-hi);font-size:10px;padding:9px 12px}
+.req-table td{padding:10px 12px;font-size:12px}
+.req-branch{max-width:240px;overflow:hidden;text-overflow:ellipsis;color:var(--muted)}
 .rank-pill{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:7px;background:var(--surface-hi);color:var(--ink-2);font-weight:700;font-size:11.5px;border:1px solid var(--line)}
 .rank-pill.gold{background:linear-gradient(135deg,#f1c40f,#e67e22);color:#fff;border:0}
 .rank-pill.silver{background:linear-gradient(135deg,#bdc3c7,#7f8c8d);color:#fff;border:0}
@@ -1161,21 +1171,51 @@ async function refreshTimeline(){
 }
 function renderRepos(d){
   const r = d.repos || [];
-  $('repoBody').innerHTML = r.length ? r.map(x => {
+  $('repoBody').innerHTML = r.length ? r.map((x, idx) => {
     const top = (x.top_contributors || []).slice(0, 3).map(c => '<span class="tag">' + esc(c.name) + ' · ' + c.commits + '</span>').join(' ');
-    const reqs = (x.requirements || []).slice(0, 3).map(r => '<span class="tag" title="' + esc(r.branch_name || '') + '">' + esc(r.requirement_id) + ' · ' + (r.commit_count || 0) + '</span>').join(' ');
-    return '<tr><td><b>' + esc(x.repo_name || x.repo_url || '-') + '</b><div style="font-size:11px;color:var(--muted);margin-top:3px">' + esc((x.repo_url || '').replace(/.*[\/:]/, '').slice(0, 50)) + '</div></td>'
+    const reqs = x.requirements || [];
+    const reqSummary = reqs.length ? '<span class="tag brand">' + reqs.length + ' 个</span>' : '<span style="color:var(--muted)">-</span>';
+    const detailId = 'repoReq_' + idx;
+    const toggle = reqs.length
+      ? "<button type=\"button\" class=\"repo-expand-btn\" onclick=\"event.stopPropagation(); toggleRepoReq('" + detailId + "', this.parentElement.parentElement); return false;\">展开需求</button><span class=\"repo-toggle\">+</span>"
+      : '<span class="repo-expand-btn disabled">无需求</span><span class="repo-toggle" style="opacity:.35">·</span>';
+    const detail = reqs.length ? '<tr class="repo-detail" id="' + detailId + '" style="display:none"><td colspan="11"><div class="req-table"><table><thead><tr>'
+      + '<th>需求ID</th><th>分支</th><th>提交</th><th>贡献者</th><th>新增代码行</th><th>AI 代码行</th><th>AI 占比</th><th>最近活跃</th>'
+      + '</tr></thead><tbody>'
+      + reqs.map(req => '<tr>'
+        + '<td><span class="tag brand">' + esc(req.requirement_id) + '</span></td>'
+        + '<td class="req-branch" title="' + esc(req.branch_name || '') + '">' + esc(req.branch_name || '-') + '</td>'
+        + '<td class="tabular">' + (req.commit_count || 0) + '</td>'
+        + '<td class="tabular">' + (req.contributor_count || 0) + '</td>'
+        + '<td class="tabular">' + fmt(req.total_added_lines || 0) + '</td>'
+        + '<td class="tabular">' + fmt(req.ai_lines || 0) + '</td>'
+        + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(req.ai_pct || 0, 100) + '%"></i></div><span class="num">' + pct(req.ai_pct || 0) + '</span></div></td>'
+        + '<td class="tabular">' + dt(req.last_activity) + '</td>'
+        + '</tr>').join('')
+      + '</tbody></table></div></td></tr>' : '';
+    return '<tr class="row" onclick="toggleRepoReq(\'' + detailId + '\', this)">'
+      + '<td><div style="display:flex;align-items:flex-start;gap:8px">' + toggle + '<div><b>' + esc(x.repo_name || x.repo_url || '-') + '</b><div style="font-size:11px;color:var(--muted);margin-top:3px">' + esc((x.repo_url || '').replace(/.*[\/:]/, '').slice(0, 50)) + '</div></div></div></td>'
       + '<td class="tabular">' + (x.commit_count || 0) + '</td>'
       + '<td class="tabular">' + (x.contributor_count || 0) + '</td>'
       + '<td class="tabular">' + fmt(x.total_added_lines || 0) + '</td>'
-      + '<td class="tabular">' + fmt(x.ai_edit_lines || 0) + '</td>'
+      + '<td class="tabular">' + fmt(x.ai_lines || x.ai_edit_lines || 0) + '</td>'
       + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(x.ai_pct, 100) + '%"></i></div><span class="num">' + pct(x.ai_pct) + '</span></div></td>'
       + '<td class="tabular">' + (x.edit_count || 0) + '</td>'
       + '<td class="tabular">' + fmt(x.prompt_message_count || 0) + '</td>'
-      + '<td>' + (reqs || '<span style="color:var(--muted)">-</span>') + '</td>'
+      + '<td>' + reqSummary + '</td>'
       + '<td>' + (top || '<span style="color:var(--muted)">-</span>') + '</td>'
-      + '<td class="tabular">' + dt(x.last_activity) + '</td></tr>';
+      + '<td class="tabular">' + dt(x.last_activity) + '</td></tr>' + detail;
   }).join('') : '<tr><td colspan="11" class="empty">暂无仓库数据</td></tr>';
+}
+function toggleRepoReq(id, row){
+  const el = $(id);
+  if(!el) return;
+  const show = el.style.display === 'none';
+  el.style.display = show ? '' : 'none';
+  const ico = row.querySelector('.repo-toggle');
+  if(ico) ico.textContent = show ? '-' : '+';
+  const btn = row.querySelector('.repo-expand-btn');
+  if(btn && !btn.classList.contains('disabled')) btn.textContent = show ? '收起需求' : '展开需求';
 }
 function renderWeekly(d){
   const w = d.weeks || [];

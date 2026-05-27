@@ -309,24 +309,53 @@ async def _requirement_stats_by_repo(db: AsyncSession, repo_urls: list[str], sin
         select(
             MetricEvent.repo_url,
             MetricEvent.requirement_id,
-            func.max(MetricEvent.branch_name),
-            func.count(MetricEvent.id),
-            func.count(func.distinct(MetricEvent.member_id)),
-            func.max(MetricEvent.created_at),
+            MetricEvent.branch_name,
+            MetricEvent.member_id,
+            MetricEvent.created_at,
+            MetricEvent.event_data,
         )
         .where(*conds)
-        .group_by(MetricEvent.repo_url, MetricEvent.requirement_id)
-        .order_by(MetricEvent.repo_url, func.count(MetricEvent.id).desc())
+        .order_by(MetricEvent.repo_url, MetricEvent.requirement_id)
     )
-    result: dict[str, list[dict]] = {}
-    for repo_url, requirement_id, branch_name, commit_count, contributor_count, last_act in rows.all():
-        result.setdefault(repo_url, []).append({
+    grouped: dict[tuple[str, int], dict] = {}
+    for repo_url, requirement_id, branch_name, member_id, last_act, evt_data in rows.all():
+        key = (repo_url, requirement_id)
+        item = grouped.setdefault(key, {
+            "repo_url": repo_url,
             "requirement_id": requirement_id,
             "branch_name": branch_name,
-            "commit_count": commit_count or 0,
-            "contributor_count": contributor_count or 0,
-            "last_activity": last_act.isoformat() if hasattr(last_act, "isoformat") else None,
+            "commit_count": 0,
+            "contributors": set(),
+            "last_activity": None,
+            "commits": [],
         })
+        item["branch_name"] = branch_name or item["branch_name"]
+        item["commit_count"] += 1
+        if member_id:
+            item["contributors"].add(member_id)
+        item["last_activity"] = max(item["last_activity"], last_act) if item["last_activity"] else last_act
+        item["commits"].append((evt_data,))
+
+    result: dict[str, list[dict]] = {}
+    for item in grouped.values():
+        totals = _aggregate_commits(item["commits"])
+        total_added = totals["total_added"]
+        repo_url = item["repo_url"]
+        result.setdefault(repo_url, []).append({
+            "requirement_id": item["requirement_id"],
+            "branch_name": item["branch_name"],
+            "commit_count": item["commit_count"],
+            "contributor_count": len(item["contributors"]),
+            "ai_lines": totals["ai_added"],
+            "human_lines": totals["human_added"],
+            "total_added_lines": total_added,
+            "ai_pct": totals["ai_code_pct"],
+            "mixed_added_lines": totals["mixed_added"],
+            "ai_accepted_lines": totals["ai_accepted"],
+            "last_activity": item["last_activity"].isoformat() if hasattr(item["last_activity"], "isoformat") else None,
+        })
+    for items in result.values():
+        items.sort(key=lambda x: (x["ai_lines"], x["ai_pct"], x["commit_count"]), reverse=True)
     _cache_set(cache_key, result)
     return result
 
