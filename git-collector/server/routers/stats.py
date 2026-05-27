@@ -288,6 +288,49 @@ async def _prompt_count_by_repo(db: AsyncSession, repo_urls: list[str], since: d
     return result
 
 
+async def _requirement_stats_by_repo(db: AsyncSession, repo_urls: list[str], since: datetime | None = None) -> dict[str, list[dict]]:
+    """按仓库聚合需求ID统计，需求ID来源于 rel_*_<数字> 分支。"""
+    if not repo_urls:
+        return {}
+    cache_key = f"rqr:{','.join(sorted(repo_urls))}:{since.isoformat() if since else 'all'}"
+    cached = _cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    conds = [
+        MetricEvent.repo_url.in_(repo_urls),
+        MetricEvent.event_type == 1,
+        MetricEvent.requirement_id > 0,
+    ]
+    if since:
+        conds.append(MetricEvent.created_at >= since)
+
+    rows = await db.execute(
+        select(
+            MetricEvent.repo_url,
+            MetricEvent.requirement_id,
+            func.max(MetricEvent.branch_name),
+            func.count(MetricEvent.id),
+            func.count(func.distinct(MetricEvent.member_id)),
+            func.max(MetricEvent.created_at),
+        )
+        .where(*conds)
+        .group_by(MetricEvent.repo_url, MetricEvent.requirement_id)
+        .order_by(MetricEvent.repo_url, func.count(MetricEvent.id).desc())
+    )
+    result: dict[str, list[dict]] = {}
+    for repo_url, requirement_id, branch_name, commit_count, contributor_count, last_act in rows.all():
+        result.setdefault(repo_url, []).append({
+            "requirement_id": requirement_id,
+            "branch_name": branch_name,
+            "commit_count": commit_count or 0,
+            "contributor_count": contributor_count or 0,
+            "last_activity": last_act.isoformat() if hasattr(last_act, "isoformat") else None,
+        })
+    _cache_set(cache_key, result)
+    return result
+
+
 # ============================================================
 #  批量加载成员详情 - 消除 N+1 查询
 # ============================================================
@@ -1273,6 +1316,7 @@ async def repo_stats(
 
     # 批量加载所有仓库的 prompt 消息计数
     prompt_counts = await _prompt_count_by_repo(db, repo_urls, since)
+    requirement_stats = await _requirement_stats_by_repo(db, repo_urls, since)
 
     # 批量加载所有仓库的 top 3 贡献者
     if repo_urls:
@@ -1344,6 +1388,8 @@ async def repo_stats(
             "ai_edit_lines": totals["ai_edit"],
             "ai_activity_lines": totals["ai_activity"],
             "prompt_message_count": prompt_counts.get(repo_url, 0),
+            "requirements": requirement_stats.get(repo_url, []),
+            "requirement_count": len(requirement_stats.get(repo_url, [])),
             "top_contributors": top_by_repo.get(repo_url, []),
             "last_activity": str(last_act) if last_act else None,
         })
@@ -1549,6 +1595,7 @@ async def dashboard_data(
             commits_by_repo.setdefault(repo_url, []).append((evt_data,))
 
     prompt_counts = await _prompt_count_by_repo(db, repo_urls, since)
+    requirement_stats = await _requirement_stats_by_repo(db, repo_urls, since)
 
     top_by_repo: dict[str, list[dict]] = {}
     if repo_urls:
@@ -1600,6 +1647,8 @@ async def dashboard_data(
             "ai_edit_lines": totals["ai_edit"],
             "ai_activity_lines": totals["ai_activity"],
             "prompt_message_count": prompt_counts.get(repo_url, 0),
+            "requirements": requirement_stats.get(repo_url, []),
+            "requirement_count": len(requirement_stats.get(repo_url, [])),
             "top_contributors": top_by_repo.get(repo_url, []),
             "last_activity": str(last_act) if last_act else None,
         })

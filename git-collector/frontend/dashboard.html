@@ -567,7 +567,7 @@ tbody tr.row:hover td{background:var(--surface-2)}
         <div class="card-body flush"><div class="t-wrap"><table>
           <thead><tr>
             <th>仓库</th><th>提交</th><th>贡献者</th><th>新增代码行</th><th>AI 代码行</th>
-            <th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th><th>Top 贡献者</th><th>最近活跃</th>
+            <th>AI 占比</th><th>Agent 编辑</th><th>Prompt</th><th>需求</th><th>Top 贡献者</th><th>最近活跃</th>
           </tr></thead>
           <tbody id="repoBody"></tbody>
         </table></div></div>
@@ -1163,6 +1163,7 @@ function renderRepos(d){
   const r = d.repos || [];
   $('repoBody').innerHTML = r.length ? r.map(x => {
     const top = (x.top_contributors || []).slice(0, 3).map(c => '<span class="tag">' + esc(c.name) + ' · ' + c.commits + '</span>').join(' ');
+    const reqs = (x.requirements || []).slice(0, 3).map(r => '<span class="tag" title="' + esc(r.branch_name || '') + '">' + esc(r.requirement_id) + ' · ' + (r.commit_count || 0) + '</span>').join(' ');
     return '<tr><td><b>' + esc(x.repo_name || x.repo_url || '-') + '</b><div style="font-size:11px;color:var(--muted);margin-top:3px">' + esc((x.repo_url || '').replace(/.*[\/:]/, '').slice(0, 50)) + '</div></td>'
       + '<td class="tabular">' + (x.commit_count || 0) + '</td>'
       + '<td class="tabular">' + (x.contributor_count || 0) + '</td>'
@@ -1171,9 +1172,10 @@ function renderRepos(d){
       + '<td><div class="bar-cell"><div class="bar green"><i style="width:' + Math.min(x.ai_pct, 100) + '%"></i></div><span class="num">' + pct(x.ai_pct) + '</span></div></td>'
       + '<td class="tabular">' + (x.edit_count || 0) + '</td>'
       + '<td class="tabular">' + fmt(x.prompt_message_count || 0) + '</td>'
+      + '<td>' + (reqs || '<span style="color:var(--muted)">-</span>') + '</td>'
       + '<td>' + (top || '<span style="color:var(--muted)">-</span>') + '</td>'
       + '<td class="tabular">' + dt(x.last_activity) + '</td></tr>';
-  }).join('') : '<tr><td colspan="10" class="empty">暂无仓库数据</td></tr>';
+  }).join('') : '<tr><td colspan="11" class="empty">暂无仓库数据</td></tr>';
 }
 function renderWeekly(d){
   const w = d.weeks || [];

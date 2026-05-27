@@ -4,6 +4,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 import json
 from ..database import get_db
+from ..branch_utils import extract_requirement_id, normalize_branch_name
 from ..models import MetricEvent, Member, Team, gen_uuid
 from ..config import allowed_repo_url
 
@@ -125,6 +126,8 @@ async def metrics_upload(
             repo_url = event_attrs.get("repo_url")
             if not allowed_repo_url(repo_url):
                 continue
+            branch_name = normalize_branch_name(event_attrs.get("branch"))
+            requirement_id = extract_requirement_id(branch_name)
             event_values = decode_values(event_type, event.get("v", {}))
             event_extra = {k: v for k, v in event.items() if k not in {"e", "a", "v"}}
             merged = {**event_extra, **event_attrs, **event_values, "_event_type": event_type,
@@ -135,6 +138,7 @@ async def metrics_upload(
             db.add(MetricEvent(
                 id=gen_uuid(), member_id=member_id, event_type=event_type,
                 event_data=merged, repo_url=repo_url,
+                branch_name=branch_name, requirement_id=requirement_id if requirement_id is not None else -1,
                 commit_sha=event_attrs.get("commit_sha"),
             ))
         except Exception as e:

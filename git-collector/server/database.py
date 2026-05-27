@@ -54,6 +54,28 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if DATABASE_URL.startswith("sqlite"):
+            rows = await conn.execute(text("PRAGMA table_info(metric_events)"))
+            columns = {row[1] for row in rows.fetchall()}
+            if "branch_name" not in columns:
+                await conn.execute(text(
+                    "ALTER TABLE metric_events ADD COLUMN branch_name VARCHAR(255)"
+                ))
+            if "requirement_id" not in columns:
+                await conn.execute(text(
+                    "ALTER TABLE metric_events ADD COLUMN requirement_id INTEGER"
+                ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_metric_events_branch_name "
+                "ON metric_events (branch_name)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_metric_events_requirement_id "
+                "ON metric_events (requirement_id)"
+            ))
+            await conn.execute(text(
+                "CREATE INDEX IF NOT EXISTS ix_metric_events_repo_requirement_created "
+                "ON metric_events (repo_url, requirement_id, created_at)"
+            ))
             rows = await conn.execute(text("PRAGMA table_info(prompt_metrics)"))
             columns = {row[1] for row in rows.fetchall()}
             if "parser_version" not in columns:

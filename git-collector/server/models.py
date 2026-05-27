@@ -72,12 +72,15 @@ class MetricEvent(Base):
     event_type = Column(Integer, nullable=False, index=True)
     event_data = Column(JSON, nullable=False)
     repo_url = Column(String(1024), nullable=True)
+    branch_name = Column(String(255), nullable=True, index=True)
+    requirement_id = Column(Integer, nullable=True, index=True)
     commit_sha = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=now, index=True)
     member = relationship("Member", back_populates="metric_events", lazy="select")
     __table_args__ = (
         Index("ix_metric_events_member_type_created", "member_id", "event_type", "created_at"),
         Index("ix_metric_events_repo_url", "repo_url"),
+        Index("ix_metric_events_repo_requirement_created", "repo_url", "requirement_id", "created_at"),
     )
 
 
